@@ -346,6 +346,12 @@ function App() {
         }
     };
 
+    const copyToClipboard = (hex) => {
+        navigator.clipboard.writeText(hex).then(() => {
+            alert("HEX 코드가 클립보드에 복사되었습니다!");
+        });
+    };
+
     useEffect(() => {
         if (
             !isUpdating &&
@@ -411,16 +417,7 @@ function App() {
                     min="1"
                 />
             </div>
-            <div style={{ margin: "10px" }}>
-                <label style={{ marginLeft: "20px" }}>
-                    <input
-                        type="checkbox"
-                        checked={showConvexHull}
-                        onChange={(e) => setShowConvexHull(e.target.checked)}
-                    />
-                    Show Convex Hull
-                </label>
-            </div>
+
             <div
                 style={{
                     display: "flex",
@@ -457,43 +454,79 @@ function App() {
                     showConvexHull={showConvexHull}
                 />
             )}
+            <div style={{ margin: "10px" }}>
+                <label style={{ marginLeft: "20px" }}>
+                    <input
+                        type="checkbox"
+                        checked={showConvexHull}
+                        onChange={(e) => setShowConvexHull(e.target.checked)}
+                    />
+                    Show Convex Hull
+                </label>
+            </div>
             {clusters.length > 0 && (
                 <div style={{ textAlign: "center", padding: "10px" }}>
                     <h2>대표 색상 팔레트</h2>
-                    {clusters.map((c, i) => (
-                        <div
-                            key={i}
-                            style={{ display: "inline-block", margin: "5px" }}
-                        >
-                            <div
-                                style={{
-                                    width: "50px",
-                                    height: "50px",
-                                    backgroundColor: `rgb(${Math.floor(
-                                        c.rgb[0] * 255
-                                    )}, ${Math.floor(
-                                        c.rgb[1] * 255
-                                    )}, ${Math.floor(c.rgb[2] * 255)})`,
-                                }}
-                            />
-                            <input
-                                type="color"
-                                value={`#${Math.floor(c.rgb[0] * 255)
-                                    .toString(16)
-                                    .padStart(2, "0")}${Math.floor(
-                                    c.rgb[1] * 255
-                                )
-                                    .toString(16)
-                                    .padStart(2, "0")}${Math.floor(
-                                    c.rgb[2] * 255
-                                )
-                                    .toString(16)
-                                    .padStart(2, "0")}`}
-                                onChange={(e) => handleColorChange(i, e)}
-                                style={{ marginTop: "5px" }}
-                            />
-                        </div>
-                    ))}
+                    <div
+                        style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            justifyContent: "center",
+                        }}
+                    >
+                        {clusters.map((c, i) => {
+                            const hex = `#${Math.floor(c.rgb[0] * 255)
+                                .toString(16)
+                                .padStart(2, "0")}${Math.floor(c.rgb[1] * 255)
+                                .toString(16)
+                                .padStart(2, "0")}${Math.floor(c.rgb[2] * 255)
+                                .toString(16)
+                                .padStart(2, "0")}`;
+                            // const percentage =
+                            //     clusterPercentages.get(c.originalIndex) || 0;
+                            return (
+                                <div
+                                    key={i}
+                                    style={{
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        alignItems: "center",
+                                        margin: "10px",
+                                        padding: "8px",
+                                        gap: "4px",
+                                        width: "110px",
+                                    }}
+                                >
+                                    <div
+                                        style={{
+                                            width: "50px",
+                                            height: "50px",
+                                            backgroundColor: `rgb(${Math.floor(
+                                                c.rgb[0] * 255
+                                            )}, ${Math.floor(
+                                                c.rgb[1] * 255
+                                            )}, ${Math.floor(c.rgb[2] * 255)})`,
+                                        }}
+                                    />
+                                    <input
+                                        type="color"
+                                        value={hex}
+                                        onChange={(e) =>
+                                            handleColorChange(i, e)
+                                        }
+                                    />
+                                    <button
+                                        onClick={() => copyToClipboard(hex)}
+                                    >
+                                        <span style={{}}>{hex}</span>
+                                    </button>
+                                    {/* <span style={{ marginLeft: "5px" }}>
+                                    ({percentage}%)
+                                </span> */}
+                                </div>
+                            );
+                        })}
+                    </div>
                     {isUpdating && <p>색상 변경 중...</p>}
                 </div>
             )}
