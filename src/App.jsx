@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import Scene from "./Scene";
 
+// 고유 색상 추출 함수
 function uniquePixels(data, width, height, skip_transparent = true) {
     let unique = new Map(); // 색상과 좌표를 매핑하기 위해 Map 사용
 
@@ -37,8 +38,9 @@ function App() {
     const [isUpdating, setIsUpdating] = useState(false);
     const [colorWeight, setColorWeight] = useState(1.0);
     const [spatialWeight, setSpatialWeight] = useState(0.1);
-    const [enableDamping, setEnableDamping] = useState(true); // 추가: 관성 상태
-    const [showConvexHull, setShowConvexHull] = useState(true); // 추가: Convex Hull 가시성 상태
+    const [clusterCount, setClusterCount] = useState(6); // 클러스터 개수 상태 추가
+    const [enableDamping, setEnableDamping] = useState(true);
+    const [showConvexHull, setShowConvexHull] = useState(true);
     const fileInputRef = useRef(null);
     const canvasRef = useRef(null);
     const debounceTimeoutRef = useRef(null);
@@ -50,7 +52,6 @@ function App() {
             reader.onload = (e) => {
                 const img = new Image();
                 img.onload = () => {
-                    // 원본 이미지 데이터를 저장 (크기 조정 없이 색상 유지)
                     const originalCanvas = document.createElement("canvas");
                     originalCanvas.width = img.width;
                     originalCanvas.height = img.height;
@@ -58,8 +59,7 @@ function App() {
                     originalCtx.drawImage(img, 0, 0);
                     setImageData(originalCanvas.toDataURL());
 
-                    // 분석용으로 크기 조정
-                    const maxDimension = 2000; // 최대 너비 또는 높이
+                    const maxDimension = 2000;
                     let width = img.width;
                     let height = img.height;
                     if (width > maxDimension || height > maxDimension) {
@@ -77,7 +77,7 @@ function App() {
                     canvas.width = width;
                     canvas.height = height;
                     const ctx = canvas.getContext("2d");
-                    ctx.drawImage(img, 0, 0, width, height); // 크기만 조정, 색상 유지
+                    ctx.drawImage(img, 0, 0, width, height);
                     const imageData = ctx.getImageData(0, 0, width, height);
                     canvasRef.current = canvas;
                     processImage(imageData.data, width, height);
@@ -95,9 +95,8 @@ function App() {
         const uniqueColorsWithXY = uniquePixels(data, width, height);
         console.log(`Unique Colors Found: ${uniqueColorsWithXY.length}`);
 
-        // 최대 샘플링 수를 20,000으로 설정 (성능에 따라 조정 가능)
         const maxSamples = 800000;
-        const numSamples = Math.min(maxSamples, uniqueColorsWithXY.length); // 샘플링 수 설정
+        const numSamples = Math.min(maxSamples, uniqueColorsWithXY.length);
         console.log(
             `Image size: ${width}x${height}, Total pixels: ${totalPixels}, Calculated numSamples: ${numSamples}`
         );
@@ -106,7 +105,7 @@ function App() {
         for (let i = 0; i < numSamples; i++) {
             const idx = Math.floor(Math.random() * uniqueColorsWithXY.length);
             const { rgb, xy } = uniqueColorsWithXY[idx];
-            sampled.push({ rgb, xy }); // rgb와 xy를 포함한 객체 추가
+            sampled.push({ rgb, xy });
         }
         setSamplePoints(sampled);
         console.log(
@@ -114,10 +113,9 @@ function App() {
             sampled.slice(0, 5).map((p) => ({ rgb: p.rgb, xy: p.xy }))
         );
 
-        const k = 6;
         const clusterCenters = kMeansClustering(
             sampled,
-            k,
+            clusterCount, // 동적 k 값 사용
             colorWeight,
             spatialWeight,
             50
@@ -257,7 +255,8 @@ function App() {
         setRecoloredImage(canvas.toDataURL());
 
         const layerCanvases = [];
-        for (let i = 0; i < 6; i++) {
+        for (let i = 0; i < clusterCount; i++) {
+            // 동적 k 값 사용
             const layerCanvas = document.createElement("canvas");
             layerCanvas.width = width;
             layerCanvas.height = height;
@@ -314,14 +313,20 @@ function App() {
             setColorWeight(parseFloat(value));
         } else if (type === "spatial") {
             setSpatialWeight(parseFloat(value));
+        } else if (type === "clusterCount") {
+            const newCount = Math.max(1, parseInt(value)); // 최소 1 이상
+            setClusterCount(newCount);
         }
+
         if (pixels.length > 0 && samplePoints.length > 0) {
-            const k = 6;
             const newClusters = kMeansClustering(
                 samplePoints,
-                k,
+                type === "clusterCount"
+                    ? Math.max(1, parseInt(value))
+                    : clusterCount,
                 type === "color" ? parseFloat(value) : colorWeight,
-                type === "spatial" ? parseFloat(value) : spatialWeight
+                type === "spatial" ? parseFloat(value) : spatialWeight,
+                50
             );
             setClusters(newClusters);
             pixels.forEach((pixel) => {
@@ -395,17 +400,18 @@ function App() {
                     step="0.1"
                     min="0"
                 />
+                <label> 클러스터 개수: </label>
+                <input
+                    type="number"
+                    value={clusterCount}
+                    onChange={(e) =>
+                        handleWeightChange("clusterCount", e.target.value)
+                    }
+                    step="1"
+                    min="1"
+                />
             </div>
-            {/* 추가: 체크박스 UI */}
             <div style={{ margin: "10px" }}>
-                {/* <label>
-                    <input
-                        type="checkbox"
-                        checked={enableDamping}
-                        onChange={(e) => setEnableDamping(e.target.checked)}
-                    />
-                    Rotation has Inertia
-                </label> */}
                 <label style={{ marginLeft: "20px" }}>
                     <input
                         type="checkbox"
@@ -448,7 +454,6 @@ function App() {
                 <Scene
                     points={samplePoints.map((p) => p.rgb)}
                     clusters={clusters.map((c) => c.rgb)}
-                    // enableDamping={enableDamping}
                     showConvexHull={showConvexHull}
                 />
             )}

@@ -13,17 +13,59 @@ function SceneContent({ points, clusters, enableDamping, showConvexHull }) {
     const controlsRef = useRef();
     const edgesRef = useRef(); // edges를 저장하기 위한 ref
     const statsRef = useRef(new Stats());
+    const canvasContainerRef = useRef(null);
     const [cameraInitialized, setCameraInitialized] = useState(false);
     const [autoRotateSpeed, setAutoRotateSpeed] = useState(0);
 
-    useEffect(() => {
-        statsRef.current.showPanel(0);
-        document.body.appendChild(statsRef.current.dom);
-        return () => {
-            document.body.removeChild(statsRef.current.dom);
-        };
-    }, []);
+    // useEffect(() => {
+    //     statsRef.current.showPanel(0);
+    //     document.body.appendChild(statsRef.current.dom);
 
+    //     // Stats 패널을 우측 상단에 배치하기 위한 스타일 설정
+    //     const statsElement = statsRef.current.dom;
+    //     statsElement.style.position = "absolute";
+    //     statsElement.style.top = "0px";
+    //     statsElement.style.right = "0px";
+    //     statsElement.style.left = "auto"; // 기본 left 속성 제거
+
+    //     return () => {
+    //         document.body.removeChild(statsRef.current.dom);
+    //     };
+    // }, []);
+
+    useEffect(() => {
+        // Canvas 컨테이너 요소 찾기
+        const canvas = gl.domElement;
+        const canvasContainer = canvas.parentElement;
+        canvasContainerRef.current = canvasContainer;
+
+        // Stats 초기화
+        statsRef.current.showPanel(0);
+
+        // Stats를 Canvas 컨테이너에 추가
+        canvasContainer.appendChild(statsRef.current.dom);
+
+        // 컨테이너를 relative로 만들고, Stats는 absolute로 배치
+        canvasContainer.style.position = "relative";
+
+        const statsElement = statsRef.current.dom;
+        statsElement.style.position = "absolute";
+        statsElement.style.top = "0px";
+        statsElement.style.right = "0px";
+        statsElement.style.left = "auto";
+        statsElement.style.zIndex = "100"; // Canvas 위에 표시되도록 z-index 설정
+
+        return () => {
+            // 컴포넌트 언마운트 시 Stats 제거
+            if (
+                canvasContainerRef.current &&
+                statsRef.current.dom.parentElement ===
+                    canvasContainerRef.current
+            ) {
+                canvasContainerRef.current.removeChild(statsRef.current.dom);
+            }
+        };
+    }, [gl]);
     useFrame(() => {
         statsRef.current.update();
 
