@@ -8,12 +8,13 @@ function App() {
     const [clusters, setClusters] = useState([]);
     const [recoloredImage, setRecoloredImage] = useState(null);
     const [layerImages, setLayerImages] = useState([]);
-    const [isUpdating, setIsUpdating] = useState(false); // 색상 변경 중 상태
+    const [isUpdating, setIsUpdating] = useState(false);
+    const [colorWeight, setColorWeight] = useState(1.0);
+    const [spatialWeight, setSpatialWeight] = useState(0.1);
     const fileInputRef = useRef(null);
     const canvasRef = useRef(null);
     const debounceTimeoutRef = useRef(null);
 
-    // 이미지 업로드 처리
     const handleImageUpload = (event) => {
         const file = event.target.files[0];
         if (file) {
@@ -21,20 +22,37 @@ function App() {
             reader.onload = (e) => {
                 const img = new Image();
                 img.onload = () => {
+                    // 원본 이미지 데이터를 저장 (크기 조정 없이 색상 유지)
+                    const originalCanvas = document.createElement("canvas");
+                    originalCanvas.width = img.width;
+                    originalCanvas.height = img.height;
+                    const originalCtx = originalCanvas.getContext("2d");
+                    originalCtx.drawImage(img, 0, 0);
+                    setImageData(originalCanvas.toDataURL());
+
+                    // 분석용으로 크기 조정
+                    const maxDimension = 2000; // 최대 너비 또는 높이
+                    let width = img.width;
+                    let height = img.height;
+                    if (width > maxDimension || height > maxDimension) {
+                        const aspect = width / height;
+                        if (width > height) {
+                            width = maxDimension;
+                            height = Math.round(maxDimension / aspect);
+                        } else {
+                            height = maxDimension;
+                            width = Math.round(maxDimension * aspect);
+                        }
+                    }
+
                     const canvas = document.createElement("canvas");
-                    canvas.width = img.width;
-                    canvas.height = img.height;
+                    canvas.width = width;
+                    canvas.height = height;
                     const ctx = canvas.getContext("2d");
-                    ctx.drawImage(img, 0, 0);
-                    const imageData = ctx.getImageData(
-                        0,
-                        0,
-                        img.width,
-                        img.height
-                    );
+                    ctx.drawImage(img, 0, 0, width, height); // 크기만 조정, 색상 유지
+                    const imageData = ctx.getImageData(0, 0, width, height);
                     canvasRef.current = canvas;
-                    processImage(imageData.data, img.width, img.height);
-                    setImageData(e.target.result);
+                    processImage(imageData.data, width, height);
                 };
                 img.src = e.target.result;
             };
@@ -42,10 +60,51 @@ function App() {
         }
     };
 
-    // 이미지 처리 및 클러스터링
     const processImage = (data, width, height) => {
+        const totalPixels = width * height;
+
+        // 메모리 최적화: 전체 픽셀 배열 생성 대신 직접 샘플링
+        const numSamples = Math.min(
+            50000,
+            Math.max(1000, Math.floor(totalPixels * 0.001))
+        ); // 0.1% 샘플링, 최대 50,000
+        console.log(
+            `Image size: ${width}x${height}, Total pixels: ${totalPixels}, Calculated numSamples: ${numSamples}`
+        );
+
+        const sampled = [];
+        for (let i = 0; i < numSamples; i++) {
+            const idx = Math.floor(Math.random() * totalPixels);
+            const r = data[idx * 4] / 255;
+            const g = data[idx * 4 + 1] / 255;
+            const b = data[idx * 4 + 2] / 255;
+            const x = (idx % width) / width;
+            const y = Math.floor(idx / width) / height;
+            sampled.push({ rgb: [r, g, b], xy: [x, y] });
+        }
+        setSamplePoints(sampled);
+        console.log(
+            "Sample Points (first 5):",
+            sampled.slice(0, 5).map((p) => p.rgb)
+        );
+
+        const k = 6;
+        const clusterCenters = kMeansClustering(
+            sampled,
+            k,
+            colorWeight,
+            spatialWeight,
+            50
+        ); // maxIterations 50으로 줄임
+        setClusters(clusterCenters);
+        console.log(
+            "Cluster Centers (for Palette):",
+            clusterCenters.map((c) => c.rgb)
+        );
+
+        // 메모리 최적화: 전체 pixels 배열 대신 필요한 경우에만 생성
         const allPixels = [];
-        for (let i = 0; i < width * height; i++) {
+        for (let i = 0; i < totalPixels; i++) {
             const x = (i % width) / width;
             const y = Math.floor(i / width) / height;
             const r = data[i * 4] / 255;
@@ -55,38 +114,33 @@ function App() {
         }
         setPixels(allPixels);
 
-        const numSamples = 1000;
-        const sampled = [];
-        for (let i = 0; i < numSamples; i++) {
-            const idx = Math.floor(Math.random() * allPixels.length);
-            sampled.push(allPixels[idx]);
-        }
-        setSamplePoints(sampled);
-        console.log("샘플 점 생성:", sampled.length);
-
-        const k = 6;
-        const clusterCenters = kMeansClustering(sampled, k);
-        setClusters(clusterCenters);
-
         allPixels.forEach((pixel) => {
-            pixel.cluster = assignCluster(pixel, clusterCenters);
+            pixel.cluster = assignCluster(
+                pixel,
+                clusterCenters,
+                colorWeight,
+                spatialWeight
+            );
         });
 
         if (canvasRef.current) {
             updateCanvasAndLayers(allPixels, clusterCenters, width, height);
-        } else {
-            console.error("canvasRef가 설정되지 않음");
         }
     };
 
-    // k-means 클러스터링
-    const kMeansClustering = (points, k, maxIterations = 100) => {
+    const kMeansClustering = (
+        points,
+        k,
+        colorWeight,
+        spatialWeight,
+        maxIterations = 50
+    ) => {
         let centers = points
             .slice(0, k)
             .map((p) => ({ rgb: [...p.rgb], xy: [...p.xy] }));
         for (let iter = 0; iter < maxIterations; iter++) {
             const assignments = points.map((point) =>
-                assignCluster(point, centers)
+                assignCluster(point, centers, colorWeight, spatialWeight)
             );
             const newCenters = [];
             for (let i = 0; i < k; i++) {
@@ -132,39 +186,35 @@ function App() {
             centers = newCenters;
             if (diff < 0.001) break;
         }
-        console.log("클러스터 중심:", centers);
         return centers;
     };
 
-    // 클러스터 할당
-    const assignCluster = (point, centers) => {
+    const assignCluster = (point, centers, colorWeight, spatialWeight) => {
         let minDist = Infinity;
         let clusterIdx = 0;
-        centers.forEach((center, i) => {
-            const rgbDist = Math.sqrt(
+        for (let i = 0; i < centers.length; i++) {
+            const center = centers[i];
+            const colorSquaredDist =
                 (point.rgb[0] - center.rgb[0]) ** 2 +
-                    (point.rgb[1] - center.rgb[1]) ** 2 +
-                    (point.rgb[2] - center.rgb[2]) ** 2
-            );
-            const xyDist = Math.sqrt(
+                (point.rgb[1] - center.rgb[1]) ** 2 +
+                (point.rgb[2] - center.rgb[2]) ** 2;
+            const spatialSquaredDist =
                 (point.xy[0] - center.xy[0]) ** 2 +
-                    (point.xy[1] - center.xy[1]) ** 2
-            );
-            const dist = rgbDist + xyDist;
+                (point.xy[1] - center.xy[1]) ** 2;
+            const weightedSquaredDist =
+                colorWeight * colorSquaredDist +
+                spatialWeight * spatialSquaredDist;
+            const dist = Math.sqrt(weightedSquaredDist);
             if (dist < minDist) {
                 minDist = dist;
                 clusterIdx = i;
             }
-        });
+        }
         return clusterIdx;
     };
 
-    // 캔버스 및 레이어 이미지 업데이트
     const updateCanvasAndLayers = (pixels, centers, width, height) => {
-        if (!canvasRef.current) {
-            console.error("canvasRef가 null입니다");
-            return;
-        }
+        if (!canvasRef.current) return;
 
         const canvas = canvasRef.current;
         const ctx = canvas.getContext("2d");
@@ -206,7 +256,6 @@ function App() {
         setLayerImages(layerCanvases);
     };
 
-    // 색상 변경 처리 (변경 중 반영 안 함)
     const handleColorChange = (index, event) => {
         const newColor = event.target.value;
         const rgb = [
@@ -218,7 +267,6 @@ function App() {
         newClusters[index].rgb = rgb;
         setClusters(newClusters);
 
-        // 변경 중 상태 설정
         setIsUpdating(true);
         if (debounceTimeoutRef.current) {
             clearTimeout(debounceTimeoutRef.current);
@@ -232,8 +280,40 @@ function App() {
                     canvasRef.current.height
                 );
             }
-            setIsUpdating(false); // 변경 완료 후 반영
-        }, 300); // 300ms 지연
+            setIsUpdating(false);
+        }, 300);
+    };
+
+    const handleWeightChange = (type, value) => {
+        if (type === "color") {
+            setColorWeight(parseFloat(value));
+        } else if (type === "spatial") {
+            setSpatialWeight(parseFloat(value));
+        }
+        if (pixels.length > 0 && samplePoints.length > 0) {
+            const k = 6;
+            const newClusters = kMeansClustering(
+                samplePoints,
+                k,
+                type === "color" ? parseFloat(value) : colorWeight,
+                type === "spatial" ? parseFloat(value) : spatialWeight
+            );
+            setClusters(newClusters);
+            pixels.forEach((pixel) => {
+                pixel.cluster = assignCluster(
+                    pixel,
+                    newClusters,
+                    type === "color" ? parseFloat(value) : colorWeight,
+                    type === "spatial" ? parseFloat(value) : spatialWeight
+                );
+            });
+            updateCanvasAndLayers(
+                pixels,
+                newClusters,
+                canvasRef.current.width,
+                canvasRef.current.height
+            );
+        }
     };
 
     useEffect(() => {
@@ -269,6 +349,28 @@ function App() {
                 ref={fileInputRef}
                 style={{ margin: "10px" }}
             />
+            <div style={{ margin: "10px" }}>
+                <label>색상 가중치: </label>
+                <input
+                    type="number"
+                    value={colorWeight}
+                    onChange={(e) =>
+                        handleWeightChange("color", e.target.value)
+                    }
+                    step="0.1"
+                    min="0"
+                />
+                <label> 공간 가중치: </label>
+                <input
+                    type="number"
+                    value={spatialWeight}
+                    onChange={(e) =>
+                        handleWeightChange("spatial", e.target.value)
+                    }
+                    step="0.1"
+                    min="0"
+                />
+            </div>
             <div
                 style={{
                     display: "flex",
@@ -287,19 +389,6 @@ function App() {
                         />
                     </div>
                 )}
-                {layerImages.map((layer, i) => (
-                    <div
-                        key={i}
-                        style={{ margin: "10px", textAlign: "center" }}
-                    >
-                        <h2>레이어 {i + 1}</h2>
-                        <img
-                            src={layer}
-                            alt={`레이어 ${i + 1}`}
-                            style={{ maxWidth: "200px" }}
-                        />
-                    </div>
-                ))}
                 {recoloredImage && (
                     <div style={{ margin: "10px", textAlign: "center" }}>
                         <h2>재색상화된 이미지</h2>
@@ -357,6 +446,32 @@ function App() {
                     {isUpdating && <p>색상 변경 중...</p>}
                 </div>
             )}
+            <div
+                style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    justifyContent: "center",
+                    gap: "20px",
+                    width: "100%",
+                    maxWidth: "1200px",
+                    margin: "20px auto",
+                    backgroundColor: "#333333",
+                }}
+            >
+                {layerImages.map((layer, i) => (
+                    <div
+                        key={i}
+                        style={{ margin: "10px", textAlign: "center" }}
+                    >
+                        <h2>레이어 {i + 1}</h2>
+                        <img
+                            src={layer}
+                            alt={`레이어 ${i + 1}`}
+                            style={{ maxWidth: "200px" }}
+                        />
+                    </div>
+                ))}
+            </div>
         </div>
     );
 }
