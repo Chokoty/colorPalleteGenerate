@@ -1,6 +1,32 @@
 import { useState, useRef, useEffect } from "react";
 import Scene from "./Scene";
 
+function uniquePixels(data, width, height, skip_transparent = true) {
+    let unique = new Map(); // 색상과 좌표를 매핑하기 위해 Map 사용
+
+    let num_pixels = data.length / 4;
+    for (let i = 0; i < num_pixels; i++) {
+        const r = data[i * 4];
+        const g = data[i * 4 + 1];
+        const b = data[i * 4 + 2];
+        const a = data[i * 4 + 3];
+
+        if (skip_transparent && a === 0) continue;
+
+        const colorKey = `${r},${g},${b}`;
+        if (!unique.has(colorKey)) {
+            const x = (i % width) / width; // 정규화된 x 좌표
+            const y = Math.floor(i / width) / height; // 정규화된 y 좌표
+            unique.set(colorKey, {
+                rgb: [r / 255, g / 255, b / 255],
+                xy: [x, y],
+            });
+        }
+    }
+
+    return Array.from(unique.values()); // [{ rgb: [r, g, b], xy: [x, y] }, ...] 형식 반환
+}
+
 function App() {
     const [imageData, setImageData] = useState(null);
     const [pixels, setPixels] = useState([]);
@@ -11,6 +37,8 @@ function App() {
     const [isUpdating, setIsUpdating] = useState(false);
     const [colorWeight, setColorWeight] = useState(1.0);
     const [spatialWeight, setSpatialWeight] = useState(0.1);
+    const [enableDamping, setEnableDamping] = useState(true); // 추가: 관성 상태
+    const [showConvexHull, setShowConvexHull] = useState(true); // 추가: Convex Hull 가시성 상태
     const fileInputRef = useRef(null);
     const canvasRef = useRef(null);
     const debounceTimeoutRef = useRef(null);
@@ -63,29 +91,27 @@ function App() {
     const processImage = (data, width, height) => {
         const totalPixels = width * height;
 
-        // 메모리 최적화: 전체 픽셀 배열 생성 대신 직접 샘플링
-        const numSamples = Math.min(
-            50000,
-            Math.max(1000, Math.floor(totalPixels * 0.001))
-        ); // 0.1% 샘플링, 최대 50,000
+        // 고유 색상과 좌표 추출
+        const uniqueColorsWithXY = uniquePixels(data, width, height);
+        console.log(`Unique Colors Found: ${uniqueColorsWithXY.length}`);
+
+        // 최대 샘플링 수를 20,000으로 설정 (성능에 따라 조정 가능)
+        const maxSamples = 800000;
+        const numSamples = Math.min(maxSamples, uniqueColorsWithXY.length); // 샘플링 수 설정
         console.log(
             `Image size: ${width}x${height}, Total pixels: ${totalPixels}, Calculated numSamples: ${numSamples}`
         );
 
         const sampled = [];
         for (let i = 0; i < numSamples; i++) {
-            const idx = Math.floor(Math.random() * totalPixels);
-            const r = data[idx * 4] / 255;
-            const g = data[idx * 4 + 1] / 255;
-            const b = data[idx * 4 + 2] / 255;
-            const x = (idx % width) / width;
-            const y = Math.floor(idx / width) / height;
-            sampled.push({ rgb: [r, g, b], xy: [x, y] });
+            const idx = Math.floor(Math.random() * uniqueColorsWithXY.length);
+            const { rgb, xy } = uniqueColorsWithXY[idx];
+            sampled.push({ rgb, xy }); // rgb와 xy를 포함한 객체 추가
         }
         setSamplePoints(sampled);
         console.log(
             "Sample Points (first 5):",
-            sampled.slice(0, 5).map((p) => p.rgb)
+            sampled.slice(0, 5).map((p) => ({ rgb: p.rgb, xy: p.xy }))
         );
 
         const k = 6;
@@ -95,14 +121,13 @@ function App() {
             colorWeight,
             spatialWeight,
             50
-        ); // maxIterations 50으로 줄임
+        );
         setClusters(clusterCenters);
         console.log(
             "Cluster Centers (for Palette):",
             clusterCenters.map((c) => c.rgb)
         );
 
-        // 메모리 최적화: 전체 pixels 배열 대신 필요한 경우에만 생성
         const allPixels = [];
         for (let i = 0; i < totalPixels; i++) {
             const x = (i % width) / width;
@@ -371,6 +396,25 @@ function App() {
                     min="0"
                 />
             </div>
+            {/* 추가: 체크박스 UI */}
+            <div style={{ margin: "10px" }}>
+                {/* <label>
+                    <input
+                        type="checkbox"
+                        checked={enableDamping}
+                        onChange={(e) => setEnableDamping(e.target.checked)}
+                    />
+                    Rotation has Inertia
+                </label> */}
+                <label style={{ marginLeft: "20px" }}>
+                    <input
+                        type="checkbox"
+                        checked={showConvexHull}
+                        onChange={(e) => setShowConvexHull(e.target.checked)}
+                    />
+                    Show Convex Hull
+                </label>
+            </div>
             <div
                 style={{
                     display: "flex",
@@ -404,6 +448,8 @@ function App() {
                 <Scene
                     points={samplePoints.map((p) => p.rgb)}
                     clusters={clusters.map((c) => c.rgb)}
+                    // enableDamping={enableDamping}
+                    showConvexHull={showConvexHull}
                 />
             )}
             {clusters.length > 0 && (
