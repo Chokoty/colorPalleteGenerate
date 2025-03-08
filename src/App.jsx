@@ -411,16 +411,6 @@ function App() {
                     step="0.1"
                     min="0"
                 />
-                <label> 클러스터 개수: </label>
-                <input
-                    type="number"
-                    value={clusterCount}
-                    onChange={(e) =>
-                        handleWeightChange("clusterCount", e.target.value)
-                    }
-                    step="1"
-                    min="1"
-                />
             </div>
             <div
                 style={{
@@ -451,27 +441,51 @@ function App() {
                     </div>
                 )}
             </div>
-            <p>재색상화 시간: {recolorTime}ms</p> {/* 시간 표시 */}
             {samplePoints.length > 0 && (
-                <Scene
-                    points={samplePoints.map((p) => p.rgb)}
-                    clusters={clusters.map((c) => c.rgb)}
-                    showConvexHull={showConvexHull}
-                />
-            )}
-            <div style={{ margin: "10px" }}>
-                <label style={{ marginLeft: "20px" }}>
-                    <input
-                        type="checkbox"
-                        checked={showConvexHull}
-                        onChange={(e) => setShowConvexHull(e.target.checked)}
+                <div
+                    style={{
+                        width: "100%",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                    }}
+                >
+                    <p>재색상화 시간: {recolorTime}ms</p> {/* 시간 표시 */}
+                    <Scene
+                        points={samplePoints.map((p) => p.rgb)}
+                        clusters={clusters.map((c) => c.rgb)}
+                        showConvexHull={showConvexHull}
                     />
-                    Show Convex Hull
-                </label>
+                    <div style={{ margin: "10px" }}>
+                        <label style={{ marginLeft: "20px" }}>
+                            <input
+                                type="checkbox"
+                                checked={showConvexHull}
+                                onChange={(e) =>
+                                    setShowConvexHull(e.target.checked)
+                                }
+                            />
+                            Show Convex Hull
+                        </label>
+                    </div>
+                </div>
+            )}
+            <div>
+                <label> 클러스터 개수: </label>
+                <input
+                    type="number"
+                    value={clusterCount}
+                    onChange={(e) =>
+                        handleWeightChange("clusterCount", e.target.value)
+                    }
+                    step="1"
+                    min="1"
+                />
             </div>
             {clusters.length > 0 && (
                 <div style={{ textAlign: "center", padding: "10px" }}>
                     <h2>대표 색상 팔레트</h2>
+
                     <div
                         style={{
                             display: "flex",
