@@ -34,6 +34,7 @@ function App() {
     const [samplePoints, setSamplePoints] = useState([]);
     const [clusters, setClusters] = useState([]);
     const [recoloredImage, setRecoloredImage] = useState(null);
+    const [recolorTime, setRecolorTime] = useState(0); // 재색상화 시간
     const [layerImages, setLayerImages] = useState([]);
     const [isUpdating, setIsUpdating] = useState(false);
     const [colorWeight, setColorWeight] = useState(1.0);
@@ -243,6 +244,7 @@ function App() {
         const ctx = canvas.getContext("2d");
         const imageData = ctx.createImageData(width, height);
 
+        const startTime = performance.now(); // 시작 시간 측정
         pixels.forEach((p) => {
             const i = p.index * 4;
             const color = centers[p.cluster].rgb;
@@ -252,6 +254,9 @@ function App() {
             imageData.data[i + 3] = 255;
         });
         ctx.putImageData(imageData, 0, 0);
+        const endTime = performance.now(); // 종료 시간 측정
+        const timeTaken = (endTime - startTime).toFixed(2); // 소수점 2자리
+        setRecolorTime(timeTaken); // 시간 상태 업데이트
         setRecoloredImage(canvas.toDataURL());
 
         const layerCanvases = [];
@@ -417,7 +422,6 @@ function App() {
                     min="1"
                 />
             </div>
-
             <div
                 style={{
                     display: "flex",
@@ -447,6 +451,7 @@ function App() {
                     </div>
                 )}
             </div>
+            <p>재색상화 시간: {recolorTime}ms</p> {/* 시간 표시 */}
             {samplePoints.length > 0 && (
                 <Scene
                     points={samplePoints.map((p) => p.rgb)}

@@ -76,7 +76,7 @@ function SceneContent({ points, clusters, enableDamping, showConvexHull }) {
                 isNaN(camera.position.y) ||
                 isNaN(camera.position.z)
             ) {
-                camera.position.set(1500, 1500, 1500);
+                camera.position.set(3000, 3000, 3000);
             }
             controlsRef.current.target.set(127.5, 127.5, 127.5);
             controlsRef.current.update();
@@ -309,11 +309,12 @@ function SceneContent({ points, clusters, enableDamping, showConvexHull }) {
     useEffect(() => {
         const controls = controlsRef.current;
         if (controls) {
-            controls.minDistance = 100;
-            controls.maxDistance = 600;
+            controls.minDistance = 400; // 최소 거리 큐브 밖으로
+            controls.maxDistance = 5000; // 최대 거리 증가
             controls.minPolarAngle = 0;
             controls.maxPolarAngle = Math.PI;
             controls.enablePan = true;
+            controls.update(); // 초기 업데이트 강제 실행
         }
     }, []);
 
@@ -326,10 +327,10 @@ function SceneContent({ points, clusters, enableDamping, showConvexHull }) {
                 autoRotate={false}
             />
             <perspectiveCamera
-                position={[1500, 1500, 1500]}
+                position={[3000, 3000, 3000]} // 더 멀리 설정 (기존: 1500, 1500, 1500)
                 lookAt={[127.5, 127.5, 127.5]}
                 near={1}
-                far={2000}
+                far={4000} // far 값을 증가시켜 더 멀리 볼 수 있도록 (기존: 2000)
             />
         </>
     );
