@@ -236,7 +236,7 @@ function App() {
         }
         return clusterIdx;
     };
-
+    //
     const updateCanvasAndLayers = (pixels, centers, width, height) => {
         if (!canvasRef.current) return;
 
