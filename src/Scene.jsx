@@ -76,11 +76,39 @@ function SceneContent({ points, clusters, enableDamping, showConvexHull }) {
                 isNaN(camera.position.y) ||
                 isNaN(camera.position.z)
             ) {
-                camera.position.set(3000, 3000, 3000);
+                // camera.position.set(2000, 2000, 2000);
+                camera.position.set(400, 400, 500);
             }
             controlsRef.current.target.set(127.5, 127.5, 127.5);
             controlsRef.current.update();
             setCameraInitialized(true);
+        }
+
+        // 카메라가 너무 멀어졌는지 확인하고 제한
+        if (controlsRef.current) {
+            const distance = camera.position.distanceTo(
+                new THREE.Vector3(127.5, 127.5, 127.5)
+            );
+
+            // 거리가 최대 거리를 초과하는 경우
+            if (distance > 800) {
+                // 방향 벡터 계산
+                const direction = new THREE.Vector3()
+                    .subVectors(
+                        camera.position,
+                        new THREE.Vector3(127.5, 127.5, 127.5)
+                    )
+                    .normalize();
+
+                // 최대 거리에 맞게 위치 조정
+                camera.position.copy(
+                    new THREE.Vector3(127.5, 127.5, 127.5).add(
+                        direction.multiplyScalar(800)
+                    )
+                );
+
+                controlsRef.current.update();
+            }
         }
         // 디버깅: 카메라 위치와 타겟 로그 출력
         // console.log("Camera Position:", camera.position);
@@ -309,11 +337,20 @@ function SceneContent({ points, clusters, enableDamping, showConvexHull }) {
     useEffect(() => {
         const controls = controlsRef.current;
         if (controls) {
-            controls.minDistance = 400; // 최소 거리 큐브 밖으로
-            controls.maxDistance = 5000; // 최대 거리 증가
-            controls.minPolarAngle = 0;
-            controls.maxPolarAngle = Math.PI;
-            controls.enablePan = true;
+            // controls.minDistance = 150; // 최소 거리 큐브 밖으로
+            // controls.maxDistance = 2000; // 최대 거리 증가
+            // controls.minPolarAngle = 0;
+            // controls.maxPolarAngle = Math.PI;
+            // controls.enablePan = true;
+            // controls.update(); // 초기 업데이트 강제 실행
+            controls.minDistance = 150; // 최소 거리 (너무 가까이 가지 않도록)
+            controls.maxDistance = 800; // 최대 거리 (너무 멀어지지 않도록)
+            controls.minPolarAngle = 0; // 위쪽 제한 없음
+            controls.maxPolarAngle = Math.PI; // 아래쪽 제한 없음
+            controls.enablePan = true; // 패닝 활성화
+            controls.rotateSpeed = 0.8; // 회전 속도 조정
+            controls.zoomSpeed = 1.0; // 줌 속도
+            controls.panSpeed = 0.8; // 패닝 속도
             controls.update(); // 초기 업데이트 강제 실행
         }
     }, []);
@@ -327,10 +364,10 @@ function SceneContent({ points, clusters, enableDamping, showConvexHull }) {
                 autoRotate={false}
             />
             <perspectiveCamera
-                position={[3000, 3000, 3000]} // 더 멀리 설정 (기존: 1500, 1500, 1500)
+                position={[2000, 2000, 2000]} // 더 멀리 설정 (기존: 1500, 1500, 1500)
                 lookAt={[127.5, 127.5, 127.5]}
                 near={1}
-                far={4000} // far 값을 증가시켜 더 멀리 볼 수 있도록 (기존: 2000)
+                far={2000} // far 값을 증가시켜 더 멀리 볼 수 있도록 (기존: 2000)
             />
         </>
     );
@@ -351,6 +388,12 @@ export default function Scene({
                 background: "#808080",
             }}
             gl={{ antialias: true }}
+            camera={{
+                position: [400, 400, 500],
+                fov: 50, // 시야각 좁게 설정
+                near: 1,
+                far: 2000,
+            }}
         >
             <SceneContent
                 points={points}
