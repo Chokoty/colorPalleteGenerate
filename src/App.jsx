@@ -1,31 +1,79 @@
 import { useState, useRef, useEffect } from "react";
 import Scene from "./Scene";
+import {
+    extractPaletteFromImageData,
+    simplifyRgbHull,
+} from "./rgbConvexPalette";
 
-// 고유 색상 추출 함수
-function uniquePixels(data, width, height, skip_transparent = true) {
-    let unique = new Map(); // 색상과 좌표를 매핑하기 위해 Map 사용
-
-    let num_pixels = data.length / 4;
-    for (let i = 0; i < num_pixels; i++) {
-        const r = data[i * 4];
-        const g = data[i * 4 + 1];
-        const b = data[i * 4 + 2];
-        const a = data[i * 4 + 3];
-
-        if (skip_transparent && a === 0) continue;
-
-        const colorKey = `${r},${g},${b}`;
-        if (!unique.has(colorKey)) {
-            const x = (i % width) / width; // 정규화된 x 좌표
-            const y = Math.floor(i / width) / height; // 정규화된 y 좌표
-            unique.set(colorKey, {
-                rgb: [r / 255, g / 255, b / 255],
-                xy: [x, y],
-            });
+function assignCluster(point, centers, colorWeight, spatialWeight) {
+    let minDist = Infinity;
+    let clusterIdx = 0;
+    for (let i = 0; i < centers.length; i++) {
+        const center = centers[i];
+        const colorSquaredDist =
+            (point.rgb[0] - center.rgb[0]) ** 2 +
+            (point.rgb[1] - center.rgb[1]) ** 2 +
+            (point.rgb[2] - center.rgb[2]) ** 2;
+        const spatialSquaredDist =
+            (point.xy[0] - center.xy[0]) ** 2 +
+            (point.xy[1] - center.xy[1]) ** 2;
+        const weightedSquaredDist =
+            colorWeight * colorSquaredDist + spatialWeight * spatialSquaredDist;
+        const dist = Math.sqrt(weightedSquaredDist);
+        if (dist < minDist) {
+            minDist = dist;
+            clusterIdx = i;
         }
     }
+    return clusterIdx;
+}
 
-    return Array.from(unique.values()); // [{ rgb: [r, g, b], xy: [x, y] }, ...] 형식 반환
+function assignPalette(pixels, centers, colorWeight, spatialWeight) {
+    for (const pixel of pixels) {
+        pixel.cluster = assignCluster(pixel, centers, colorWeight, spatialWeight);
+    }
+}
+
+// XY anchors are the centroids of the RGB Voronoi cells. The palette colors
+// themselves stay on the simplified hull; spatial weight only affects assignment.
+function applyCentroids(pixels, centers) {
+    const sums = centers.map(() => [0, 0, 0]);
+    for (const pixel of pixels) {
+        const bucket = sums[pixel.cluster];
+        if (!bucket) continue;
+        bucket[0] += pixel.xy[0];
+        bucket[1] += pixel.xy[1];
+        bucket[2] += 1;
+    }
+    centers.forEach((center, index) => {
+        if (sums[index][2] > 0) {
+            center.xy = [
+                sums[index][0] / sums[index][2],
+                sums[index][1] / sums[index][2],
+            ];
+        }
+    });
+}
+
+function paletteCenters(palette) {
+    return palette.map((rgb) => ({
+        rgb: [rgb[0] / 255, rgb[1] / 255, rgb[2] / 255],
+        xy: [0.5, 0.5],
+    }));
+}
+
+function viewSamples(uniqueColors) {
+    const maxSamples = 20000;
+    const step = Math.max(1, Math.floor(uniqueColors.length / maxSamples));
+    const sampled = [];
+    for (let i = 0; i < uniqueColors.length; i += step) {
+        const [r, g, b] = uniqueColors[i];
+        sampled.push({
+            rgb: [r / 255, g / 255, b / 255],
+            xy: [0.5, 0.5],
+        });
+    }
+    return sampled;
 }
 
 function App() {
@@ -45,6 +93,7 @@ function App() {
     const fileInputRef = useRef(null);
     const canvasRef = useRef(null);
     const debounceTimeoutRef = useRef(null);
+    const geometryRef = useRef(null);
 
     const handleImageUpload = (event) => {
         const file = event.target.files[0];
@@ -89,43 +138,32 @@ function App() {
         }
     };
 
+    const bindCenters = (palette, pixelList) => {
+        const centers = paletteCenters(palette);
+        assignPalette(pixelList, centers, 0, 0);
+        applyCentroids(pixelList, centers);
+        assignPalette(pixelList, centers, colorWeight, spatialWeight);
+        return centers;
+    };
+
     const processImage = (data, width, height) => {
         const totalPixels = width * height;
-
-        // 고유 색상과 좌표 추출
-        const uniqueColorsWithXY = uniquePixels(data, width, height);
-        console.log(`Unique Colors Found: ${uniqueColorsWithXY.length}`);
-
-        const maxSamples = 800000;
-        const numSamples = Math.min(maxSamples, uniqueColorsWithXY.length);
+        const extracted = extractPaletteFromImageData(data);
+        geometryRef.current = {
+            uniqueColors: extracted.uniqueColors,
+            bins: extracted.bins,
+        };
         console.log(
-            `Image size: ${width}x${height}, Total pixels: ${totalPixels}, Calculated numSamples: ${numSamples}`
+            `Image size: ${width}x${height}, opaque unique colors: ${extracted.uniqueColors.length}, hull vertices: ${extracted.initialVertexCount}`
+        );
+        console.log(
+            "Simplified RGB convex-hull palette:",
+            extracted.palette,
+            `RMSE ${extracted.finalRmse.toFixed(3)}`
         );
 
-        const sampled = [];
-        for (let i = 0; i < numSamples; i++) {
-            const idx = Math.floor(Math.random() * uniqueColorsWithXY.length);
-            const { rgb, xy } = uniqueColorsWithXY[idx];
-            sampled.push({ rgb, xy });
-        }
+        const sampled = viewSamples(extracted.uniqueColors);
         setSamplePoints(sampled);
-        console.log(
-            "Sample Points (first 5):",
-            sampled.slice(0, 5).map((p) => ({ rgb: p.rgb, xy: p.xy }))
-        );
-
-        const clusterCenters = kMeansClustering(
-            sampled,
-            clusterCount, // 동적 k 값 사용
-            colorWeight,
-            spatialWeight,
-            50
-        );
-        setClusters(clusterCenters);
-        console.log(
-            "Cluster Centers (for Palette):",
-            clusterCenters.map((c) => c.rgb)
-        );
 
         const allPixels = [];
         for (let i = 0; i < totalPixels; i++) {
@@ -136,109 +174,19 @@ function App() {
             const b = data[i * 4 + 2] / 255;
             allPixels.push({ rgb: [r, g, b], xy: [x, y], index: i });
         }
-        setPixels(allPixels);
 
-        allPixels.forEach((pixel) => {
-            pixel.cluster = assignCluster(
-                pixel,
-                clusterCenters,
-                colorWeight,
-                spatialWeight
-            );
-        });
+        const centers = bindCenters(extracted.palette, allPixels);
+        setPixels(allPixels);
+        setClusters(centers);
+        setClusterCount(centers.length);
 
         if (canvasRef.current) {
-            updateCanvasAndLayers(allPixels, clusterCenters, width, height);
+            updateCanvasAndLayers(allPixels, centers, width, height);
         }
     };
 
-    const kMeansClustering = (
-        points,
-        k,
-        colorWeight,
-        spatialWeight,
-        maxIterations = 50
-    ) => {
-        let centers = points
-            .slice(0, k)
-            .map((p) => ({ rgb: [...p.rgb], xy: [...p.xy] }));
-        for (let iter = 0; iter < maxIterations; iter++) {
-            const assignments = points.map((point) =>
-                assignCluster(point, centers, colorWeight, spatialWeight)
-            );
-            const newCenters = [];
-            for (let i = 0; i < k; i++) {
-                const clusterPoints = points.filter(
-                    (_, idx) => assignments[idx] === i
-                );
-                if (clusterPoints.length === 0) {
-                    newCenters.push(centers[i]);
-                    continue;
-                }
-                const rgbSum = clusterPoints.reduce(
-                    (sum, p) => [
-                        sum[0] + p.rgb[0],
-                        sum[1] + p.rgb[1],
-                        sum[2] + p.rgb[2],
-                    ],
-                    [0, 0, 0]
-                );
-                const xySum = clusterPoints.reduce(
-                    (sum, p) => [sum[0] + p.xy[0], sum[1] + p.xy[1]],
-                    [0, 0]
-                );
-                newCenters.push({
-                    rgb: rgbSum.map((v) => v / clusterPoints.length),
-                    xy: xySum.map((v) => v / clusterPoints.length),
-                });
-            }
-            const diff = centers.reduce((sum, c, i) => {
-                const rgbDiff = Math.sqrt(
-                    c.rgb.reduce(
-                        (s, v, j) => s + (v - newCenters[i].rgb[j]) ** 2,
-                        0
-                    )
-                );
-                const xyDiff = Math.sqrt(
-                    c.xy.reduce(
-                        (s, v, j) => s + (v - newCenters[i].xy[j]) ** 2,
-                        0
-                    )
-                );
-                return sum + rgbDiff + xyDiff;
-            }, 0);
-            centers = newCenters;
-            if (diff < 0.001) break;
-        }
-        return centers;
-    };
-
-    const assignCluster = (point, centers, colorWeight, spatialWeight) => {
-        let minDist = Infinity;
-        let clusterIdx = 0;
-        for (let i = 0; i < centers.length; i++) {
-            const center = centers[i];
-            const colorSquaredDist =
-                (point.rgb[0] - center.rgb[0]) ** 2 +
-                (point.rgb[1] - center.rgb[1]) ** 2 +
-                (point.rgb[2] - center.rgb[2]) ** 2;
-            const spatialSquaredDist =
-                (point.xy[0] - center.xy[0]) ** 2 +
-                (point.xy[1] - center.xy[1]) ** 2;
-            const weightedSquaredDist =
-                colorWeight * colorSquaredDist +
-                spatialWeight * spatialSquaredDist;
-            const dist = Math.sqrt(weightedSquaredDist);
-            if (dist < minDist) {
-                minDist = dist;
-                clusterIdx = i;
-            }
-        }
-        return clusterIdx;
-    };
-    //
     const updateCanvasAndLayers = (pixels, centers, width, height) => {
-        if (!canvasRef.current) return;
+        if (!canvasRef.current || centers.length === 0) return;
 
         const canvas = canvasRef.current;
         const ctx = canvas.getContext("2d");
@@ -260,8 +208,10 @@ function App() {
         setRecoloredImage(canvas.toDataURL());
 
         const layerCanvases = [];
-        for (let i = 0; i < clusterCount; i++) {
-            // 동적 k 값 사용
+        // Hard assignment of pixels to palette colors, so the existing recolor
+        // controls keep working. Full RGBXY additive layer decomposition
+        // (Tan, Echevarria, Gingold 2018) is the next step and is not done here.
+        for (let i = 0; i < centers.length; i++) {
             const layerCanvas = document.createElement("canvas");
             layerCanvas.width = width;
             layerCanvas.height = height;
@@ -314,37 +264,44 @@ function App() {
     };
 
     const handleWeightChange = (type, value) => {
+        let nextColor = colorWeight;
+        let nextSpatial = spatialWeight;
         if (type === "color") {
-            setColorWeight(parseFloat(value));
+            nextColor = Number.parseFloat(value);
+            if (!Number.isFinite(nextColor)) return;
+            setColorWeight(nextColor);
         } else if (type === "spatial") {
-            setSpatialWeight(parseFloat(value));
+            nextSpatial = Number.parseFloat(value);
+            if (!Number.isFinite(nextSpatial)) return;
+            setSpatialWeight(nextSpatial);
         } else if (type === "clusterCount") {
-            const newCount = Math.max(1, parseInt(value)); // 최소 1 이상
-            setClusterCount(newCount);
-        }
-
-        if (pixels.length > 0 && samplePoints.length > 0) {
-            const newClusters = kMeansClustering(
-                samplePoints,
-                type === "clusterCount"
-                    ? Math.max(1, parseInt(value))
-                    : clusterCount,
-                type === "color" ? parseFloat(value) : colorWeight,
-                type === "spatial" ? parseFloat(value) : spatialWeight,
-                50
+            const parsed = Number.parseInt(value, 10);
+            if (!Number.isFinite(parsed) || !geometryRef.current) return;
+            const requested = Math.max(1, parsed);
+            setClusterCount(requested);
+            if (pixels.length === 0 || !canvasRef.current) return;
+            const palette = simplifyRgbHull(
+                geometryRef.current.uniqueColors,
+                geometryRef.current.bins,
+                { targetVertexCount: requested }
             );
-            setClusters(newClusters);
-            pixels.forEach((pixel) => {
-                pixel.cluster = assignCluster(
-                    pixel,
-                    newClusters,
-                    type === "color" ? parseFloat(value) : colorWeight,
-                    type === "spatial" ? parseFloat(value) : spatialWeight
-                );
-            });
+            const centers = bindCenters(palette, pixels);
+            setClusters(centers);
+            setClusterCount(centers.length);
             updateCanvasAndLayers(
                 pixels,
-                newClusters,
+                centers,
+                canvasRef.current.width,
+                canvasRef.current.height
+            );
+            return;
+        }
+
+        if (pixels.length > 0 && clusters.length > 0 && canvasRef.current) {
+            assignPalette(pixels, clusters, nextColor, nextSpatial);
+            updateCanvasAndLayers(
+                pixels,
+                clusters,
                 canvasRef.current.width,
                 canvasRef.current.height
             );
