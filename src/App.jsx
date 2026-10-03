@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import Scene from "./Scene";
 import {
+    DELTA_E_STOP,
     extractPaletteFromImageData,
     paletteColorDistance2,
     recolorPixel,
@@ -170,9 +171,48 @@ function collectPixels(data, width, height) {
             rgb: [data[i * 4] / 255, data[i * 4 + 1] / 255, data[i * 4 + 2] / 255],
             xy: [(i % width) / width, Math.floor(i / width) / height],
             index: i,
+            alpha: data[i * 4 + 3],
         });
     }
     return allPixels;
+}
+
+function rgbToHex(rgb) {
+    const channel = (value) =>
+        Math.floor(value * 255)
+            .toString(16)
+            .padStart(2, "0");
+    return `#${channel(rgb[0])}${channel(rgb[1])}${channel(rgb[2])}`;
+}
+
+// Share of opaque pixels (alpha ≥ 128) whose color is nearest this swatch.
+// The percentage describes the picture, the same way the palette sheet does,
+// and it ignores the transparent fringe.
+function opaqueSharePercents(pixelList, centers) {
+    const counts = new Array(centers.length).fill(0);
+    let opaque = 0;
+    for (let i = 0; i < pixelList.length; i++) {
+        const pixel = pixelList[i];
+        if (pixel.alpha < 128) continue;
+        opaque++;
+        let best = 0;
+        let bestDist = Infinity;
+        const r = pixel.rgb[0];
+        const g = pixel.rgb[1];
+        const b = pixel.rgb[2];
+        for (let c = 0; c < centers.length; c++) {
+            const center = centers[c].rgb;
+            const dist =
+                (r - center[0]) ** 2 + (g - center[1]) ** 2 + (b - center[2]) ** 2;
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = c;
+            }
+        }
+        counts[best]++;
+    }
+    if (opaque === 0) return counts.map(() => 0);
+    return counts.map((n) => (100 * n) / opaque);
 }
 
 function paintedChannels(pixel, center, paintMode) {
@@ -203,6 +243,8 @@ function App() {
     const [colorWeight, setColorWeight] = useState(1.0);
     const [spatialWeight, setSpatialWeight] = useState(0.1);
     const [clusterCount, setClusterCount] = useState(6);
+    const [opaqueShares, setOpaqueShares] = useState([]);
+    const [deltaEStop, setDeltaEStop] = useState(DELTA_E_STOP);
     const [showConvexHull, setShowConvexHull] = useState(true);
     const fileInputRef = useRef(null);
     const canvasRef = useRef(null);
@@ -288,6 +330,7 @@ function App() {
         setPixels(allPixels);
         setClusters(centers);
         setClusterCount(count);
+        setOpaqueShares(opaqueSharePercents(allPixels, centers));
         console.log(
             "Manual k-means palette:",
             centers.map((c) => c.rgb)
@@ -316,6 +359,8 @@ function App() {
         setPixels(allPixels);
         setClusters(centers);
         setClusterCount(centers.length);
+        setDeltaEStop(extracted.deltaEStop);
+        setOpaqueShares(opaqueSharePercents(allPixels, centers));
         if (canvasRef.current) {
             updateCanvasAndLayers(allPixels, centers, width, height, "auto");
         }
@@ -409,6 +454,7 @@ function App() {
         const newClusters = [...clusters];
         newClusters[index] = { ...newClusters[index], rgb };
         setClusters(newClusters);
+        setOpaqueShares(opaqueSharePercents(pixels, newClusters));
 
         setIsUpdating(true);
         if (debounceTimeoutRef.current) {
@@ -455,6 +501,7 @@ function App() {
             return;
         }
         assignPalette(pixels, clusters, nextColor, nextSpatial);
+        setOpaqueShares(opaqueSharePercents(pixels, clusters));
         updateCanvasAndLayers(
             pixels,
             clusters,
@@ -550,22 +597,119 @@ function App() {
                     display: "flex",
                     flexWrap: "wrap",
                     justifyContent: "center",
+                    alignItems: "flex-start",
+                    gap: "28px",
                     margin: "20px 0",
+                    width: "100%",
                 }}
             >
-                {imageData && (
-                    <div style={{ margin: "10px", textAlign: "center" }}>
-                        <h2>원본 이미지</h2>
-                        <img src={imageData} alt="원본" style={{ maxWidth: "200px" }} />
-                    </div>
-                )}
+                <div
+                    style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        alignItems: "flex-start",
+                        gap: "28px",
+                    }}
+                >
+                    {imageData && (
+                        <div style={{ textAlign: "center" }}>
+                            <h2>원본 이미지</h2>
+                            <div
+                                style={{
+                                    display: "inline-block",
+                                    lineHeight: 0,
+                                    backgroundColor: "#f5f5f5",
+                                    backgroundImage:
+                                        "linear-gradient(45deg, #d2d2d2 25%, transparent 25%), linear-gradient(-45deg, #d2d2d2 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #d2d2d2 75%), linear-gradient(-45deg, transparent 75%, #d2d2d2 75%)",
+                                    backgroundSize: "16px 16px",
+                                    backgroundPosition: "0 0, 0 8px, 8px -8px, -8px 0",
+                                }}
+                            >
+                                <img
+                                    src={imageData}
+                                    alt="원본"
+                                    style={{ maxHeight: "640px", maxWidth: "100%", height: "auto" }}
+                                />
+                            </div>
+                        </div>
+                    )}
+                    {clusters.length > 0 && (
+                        <div style={{ textAlign: "left", color: "#141414", paddingTop: "8px" }}>
+                            <div style={{ fontSize: "22px", lineHeight: 1.2 }}>
+                                {clusters.length} swatches
+                            </div>
+                            {mode === "auto" && (
+                                <div style={{ marginTop: "4px", fontSize: "15px", color: "#505050" }}>
+                                    stop ΔE {Math.round(deltaEStop)}
+                                </div>
+                            )}
+                            <div
+                                style={{
+                                    marginTop: "18px",
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "14px",
+                                }}
+                            >
+                                {clusters.map((c, i) => {
+                                    const hex = rgbToHex(c.rgb);
+                                    const share = opaqueShares[i] ?? 0;
+                                    return (
+                                        <div
+                                            key={`${mode}-${i}`}
+                                            style={{
+                                                display: "flex",
+                                                alignItems: "flex-start",
+                                                gap: "14px",
+                                            }}
+                                        >
+                                            <input
+                                                className="palette-swatch"
+                                                type="color"
+                                                value={hex}
+                                                aria-label={hex}
+                                                onChange={(e) => handleColorChange(i, e)}
+                                            />
+                                            <div style={{ paddingTop: "6px" }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => copyToClipboard(hex)}
+                                                    style={{
+                                                        background: "none",
+                                                        border: "none",
+                                                        padding: 0,
+                                                        font: "18px Arial, sans-serif",
+                                                        color: "#141414",
+                                                        cursor: "pointer",
+                                                    }}
+                                                >
+                                                    {hex}
+                                                </button>
+                                                <div
+                                                    style={{
+                                                        marginTop: "6px",
+                                                        fontSize: "15px",
+                                                        color: "#464646",
+                                                    }}
+                                                >
+                                                    {share.toFixed(1)}% opaque
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            {isUpdating && <p>색상 변경 중...</p>}
+                        </div>
+                    )}
+                </div>
                 {recoloredImage && (
-                    <div style={{ margin: "10px", textAlign: "center" }}>
+                    <div style={{ textAlign: "center" }}>
                         <h2>재색상화된 이미지</h2>
                         <img
                             src={recoloredImage}
                             alt="재색상화"
-                            style={{ maxWidth: "200px" }}
+                            style={{ maxHeight: "640px", maxWidth: "100%", height: "auto" }}
                         />
                     </div>
                 )}
@@ -608,59 +752,6 @@ function App() {
                     min="1"
                 />
             </div>
-            {clusters.length > 0 && (
-                <div style={{ textAlign: "center", padding: "10px" }}>
-                    <h2>대표 색상 팔레트</h2>
-                    <div
-                        style={{
-                            display: "flex",
-                            flexWrap: "wrap",
-                            justifyContent: "center",
-                        }}
-                    >
-                        {clusters.map((c, i) => {
-                            const hex = `#${Math.floor(c.rgb[0] * 255)
-                                .toString(16)
-                                .padStart(2, "0")}${Math.floor(c.rgb[1] * 255)
-                                .toString(16)
-                                .padStart(2, "0")}${Math.floor(c.rgb[2] * 255)
-                                .toString(16)
-                                .padStart(2, "0")}`;
-                            return (
-                                <div
-                                    key={`${mode}-${i}`}
-                                    style={{
-                                        display: "flex",
-                                        flexDirection: "column",
-                                        alignItems: "center",
-                                        margin: "10px",
-                                        padding: "8px",
-                                        gap: "4px",
-                                        width: "110px",
-                                    }}
-                                >
-                                    <div
-                                        style={{
-                                            width: "50px",
-                                            height: "50px",
-                                            backgroundColor: `rgb(${Math.floor(c.rgb[0] * 255)}, ${Math.floor(c.rgb[1] * 255)}, ${Math.floor(c.rgb[2] * 255)})`,
-                                        }}
-                                    />
-                                    <input
-                                        type="color"
-                                        value={hex}
-                                        onChange={(e) => handleColorChange(i, e)}
-                                    />
-                                    <button onClick={() => copyToClipboard(hex)}>
-                                        <span>{hex}</span>
-                                    </button>
-                                </div>
-                            );
-                        })}
-                    </div>
-                    {isUpdating && <p>색상 변경 중...</p>}
-                </div>
-            )}
             <div
                 style={{
                     display: "flex",

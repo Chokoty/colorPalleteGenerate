@@ -77,3 +77,27 @@ body {
     display: flex;
     flex-direction: column;
 }
+
+.palette-swatch {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 64px;
+    height: 64px;
+    padding: 0;
+    border: 1px solid #282828;
+    background: none;
+    cursor: pointer;
+    flex: 0 0 64px;
+}
+
+.palette-swatch::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.palette-swatch::-webkit-color-swatch {
+    border: none;
+}
+
+.palette-swatch::-moz-color-swatch {
+    border: none;
+}
