@@ -7,7 +7,96 @@ import {
     rgbToLab,
 } from "./imagePalette";
 
-function assignCluster(point, centers, colorWeight, spatialWeight) {
+// Main-branch extraction: the user picks k, and centers are k-means means
+// of sampled RGB+XY points. Recolor fills each pixel with its center.
+function uniquePixels(data, width, height, skipTransparent = true) {
+    const unique = new Map();
+    const numPixels = data.length / 4;
+    for (let i = 0; i < numPixels; i++) {
+        const r = data[i * 4];
+        const g = data[i * 4 + 1];
+        const b = data[i * 4 + 2];
+        const a = data[i * 4 + 3];
+        if (skipTransparent && a === 0) continue;
+        const colorKey = `${r},${g},${b}`;
+        if (!unique.has(colorKey)) {
+            unique.set(colorKey, {
+                rgb: [r / 255, g / 255, b / 255],
+                xy: [(i % width) / width, Math.floor(i / width) / height],
+            });
+        }
+    }
+    return Array.from(unique.values());
+}
+
+function rgbAssignCluster(point, centers, colorWeight, spatialWeight) {
+    let minDist = Infinity;
+    let clusterIdx = 0;
+    for (let i = 0; i < centers.length; i++) {
+        const center = centers[i];
+        const colorSquaredDist =
+            (point.rgb[0] - center.rgb[0]) ** 2 +
+            (point.rgb[1] - center.rgb[1]) ** 2 +
+            (point.rgb[2] - center.rgb[2]) ** 2;
+        const spatialSquaredDist =
+            (point.xy[0] - center.xy[0]) ** 2 +
+            (point.xy[1] - center.xy[1]) ** 2;
+        const dist = Math.sqrt(
+            colorWeight * colorSquaredDist + spatialWeight * spatialSquaredDist
+        );
+        if (dist < minDist) {
+            minDist = dist;
+            clusterIdx = i;
+        }
+    }
+    return clusterIdx;
+}
+
+function kMeansClustering(points, k, colorWeight, spatialWeight, maxIterations = 50) {
+    const count = Math.max(1, Math.min(k, points.length));
+    let centers = points
+        .slice(0, count)
+        .map((p) => ({ rgb: [...p.rgb], xy: [...p.xy] }));
+    for (let iter = 0; iter < maxIterations; iter++) {
+        const assignments = points.map((point) =>
+            rgbAssignCluster(point, centers, colorWeight, spatialWeight)
+        );
+        const newCenters = [];
+        for (let i = 0; i < count; i++) {
+            const clusterPoints = points.filter((_, idx) => assignments[idx] === i);
+            if (clusterPoints.length === 0) {
+                newCenters.push(centers[i]);
+                continue;
+            }
+            const rgbSum = clusterPoints.reduce(
+                (sum, p) => [sum[0] + p.rgb[0], sum[1] + p.rgb[1], sum[2] + p.rgb[2]],
+                [0, 0, 0]
+            );
+            const xySum = clusterPoints.reduce(
+                (sum, p) => [sum[0] + p.xy[0], sum[1] + p.xy[1]],
+                [0, 0]
+            );
+            newCenters.push({
+                rgb: rgbSum.map((v) => v / clusterPoints.length),
+                xy: xySum.map((v) => v / clusterPoints.length),
+            });
+        }
+        const diff = centers.reduce((sum, c, i) => {
+            const rgbDiff = Math.sqrt(
+                c.rgb.reduce((s, v, j) => s + (v - newCenters[i].rgb[j]) ** 2, 0)
+            );
+            const xyDiff = Math.sqrt(
+                c.xy.reduce((s, v, j) => s + (v - newCenters[i].xy[j]) ** 2, 0)
+            );
+            return sum + rgbDiff + xyDiff;
+        }, 0);
+        centers = newCenters;
+        if (diff < 0.001) break;
+    }
+    return centers;
+}
+
+function labAssignCluster(point, centers, colorWeight, spatialWeight) {
     let minDist = Infinity;
     let clusterIdx = 0;
     for (let i = 0; i < centers.length; i++) {
@@ -16,9 +105,9 @@ function assignCluster(point, centers, colorWeight, spatialWeight) {
         const spatialSquaredDist =
             (point.xy[0] - center.xy[0]) ** 2 +
             (point.xy[1] - center.xy[1]) ** 2;
-        const weightedSquaredDist =
-            colorWeight * colorSquaredDist + spatialWeight * spatialSquaredDist;
-        const dist = Math.sqrt(weightedSquaredDist);
+        const dist = Math.sqrt(
+            colorWeight * colorSquaredDist + spatialWeight * spatialSquaredDist
+        );
         if (dist < minDist) {
             minDist = dist;
             clusterIdx = i;
@@ -29,26 +118,16 @@ function assignCluster(point, centers, colorWeight, spatialWeight) {
 
 function assignPalette(pixels, centers, colorWeight, spatialWeight) {
     for (const center of centers) {
-        center.lab = rgbToLab(
-            center.rgb[0] * 255,
-            center.rgb[1] * 255,
-            center.rgb[2] * 255
-        );
+        center.lab = rgbToLab(center.rgb[0] * 255, center.rgb[1] * 255, center.rgb[2] * 255);
     }
     for (const pixel of pixels) {
         if (!pixel.lab) {
-            pixel.lab = rgbToLab(
-                pixel.rgb[0] * 255,
-                pixel.rgb[1] * 255,
-                pixel.rgb[2] * 255
-            );
+            pixel.lab = rgbToLab(pixel.rgb[0] * 255, pixel.rgb[1] * 255, pixel.rgb[2] * 255);
         }
-        pixel.cluster = assignCluster(pixel, centers, colorWeight, spatialWeight);
+        pixel.cluster = labAssignCluster(pixel, centers, colorWeight, spatialWeight);
     }
 }
 
-// XY anchors are the centroids of the RGB Voronoi cells. The palette colors
-// stay the extracted means; spatial weight only affects assignment.
 function applyCentroids(pixels, centers) {
     const sums = centers.map(() => [0, 0, 0]);
     for (const pixel of pixels) {
@@ -60,10 +139,7 @@ function applyCentroids(pixels, centers) {
     }
     centers.forEach((center, index) => {
         if (sums[index][2] > 0) {
-            center.xy = [
-                sums[index][0] / sums[index][2],
-                sums[index][1] / sums[index][2],
-            ];
+            center.xy = [sums[index][0] / sums[index][2], sums[index][1] / sums[index][2]];
         }
     });
 }
@@ -81,165 +157,99 @@ function viewSamples(uniqueColors) {
     const sampled = [];
     for (let i = 0; i < uniqueColors.length; i += step) {
         const [r, g, b] = uniqueColors[i];
-        sampled.push({
-            rgb: [r / 255, g / 255, b / 255],
-            xy: [0.5, 0.5],
-        });
+        sampled.push({ rgb: [r / 255, g / 255, b / 255], xy: [0.5, 0.5] });
     }
     return sampled;
 }
 
+function collectPixels(data, width, height) {
+    const allPixels = [];
+    const totalPixels = width * height;
+    for (let i = 0; i < totalPixels; i++) {
+        allPixels.push({
+            rgb: [data[i * 4] / 255, data[i * 4 + 1] / 255, data[i * 4 + 2] / 255],
+            xy: [(i % width) / width, Math.floor(i / width) / height],
+            index: i,
+        });
+    }
+    return allPixels;
+}
+
+function paintedChannels(pixel, center, paintMode) {
+    if (paintMode === "auto") {
+        const color = recolorPixel(
+            [pixel.rgb[0] * 255, pixel.rgb[1] * 255, pixel.rgb[2] * 255],
+            [center.rgb[0] * 255, center.rgb[1] * 255, center.rgb[2] * 255]
+        );
+        return [Math.floor(color[0]), Math.floor(color[1]), Math.floor(color[2])];
+    }
+    return [
+        Math.floor(center.rgb[0] * 255),
+        Math.floor(center.rgb[1] * 255),
+        Math.floor(center.rgb[2] * 255),
+    ];
+}
+
 function App() {
+    const [mode, setMode] = useState("manual");
     const [imageData, setImageData] = useState(null);
     const [pixels, setPixels] = useState([]);
     const [samplePoints, setSamplePoints] = useState([]);
     const [clusters, setClusters] = useState([]);
     const [recoloredImage, setRecoloredImage] = useState(null);
-    const [recolorTime, setRecolorTime] = useState(0); // 재색상화 시간
+    const [recolorTime, setRecolorTime] = useState(0);
     const [layerImages, setLayerImages] = useState([]);
     const [isUpdating, setIsUpdating] = useState(false);
     const [colorWeight, setColorWeight] = useState(1.0);
     const [spatialWeight, setSpatialWeight] = useState(0.1);
-    const [clusterCount, setClusterCount] = useState(0);
-    const [enableDamping, setEnableDamping] = useState(true);
+    const [clusterCount, setClusterCount] = useState(6);
     const [showConvexHull, setShowConvexHull] = useState(true);
     const fileInputRef = useRef(null);
     const canvasRef = useRef(null);
     const debounceTimeoutRef = useRef(null);
+    const imageRef = useRef(null);
+    const manualSamplesRef = useRef(null);
+    const manualCountRef = useRef(6);
+    const modeRef = useRef("manual");
 
-    const handleImageUpload = (event) => {
-        const file = event.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onload = () => {
-                    const originalCanvas = document.createElement("canvas");
-                    originalCanvas.width = img.width;
-                    originalCanvas.height = img.height;
-                    const originalCtx = originalCanvas.getContext("2d");
-                    originalCtx.drawImage(img, 0, 0);
-                    setImageData(originalCanvas.toDataURL());
-
-                    const maxDimension = 2000;
-                    let width = img.width;
-                    let height = img.height;
-                    if (width > maxDimension || height > maxDimension) {
-                        const aspect = width / height;
-                        if (width > height) {
-                            width = maxDimension;
-                            height = Math.round(maxDimension / aspect);
-                        } else {
-                            height = maxDimension;
-                            width = Math.round(maxDimension * aspect);
-                        }
-                    }
-
-                    const canvas = document.createElement("canvas");
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext("2d");
-                    ctx.drawImage(img, 0, 0, width, height);
-                    const imageData = ctx.getImageData(0, 0, width, height);
-                    canvasRef.current = canvas;
-                    processImage(imageData.data, width, height);
-                };
-                img.src = e.target.result;
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const bindCenters = (palette, pixelList) => {
-        const centers = paletteCenters(palette);
-        assignPalette(pixelList, centers, 0, 0);
-        applyCentroids(pixelList, centers);
-        assignPalette(pixelList, centers, colorWeight, spatialWeight);
-        return centers;
-    };
-
-    const processImage = (data, width, height) => {
-        const totalPixels = width * height;
-        const extracted = extractPaletteFromImageData(data);
-        console.log(
-            `Image size: ${width}x${height}, opaque unique colors: ${extracted.uniqueColors.length}`
-        );
-        console.log(
-            `In-image palette (${extracted.palette.length} colors, max ΔE ${extracted.maxDeltaE.toFixed(1)} / stop ${extracted.deltaEStop}):`,
-            extracted.palette
-        );
-
-        const sampled = viewSamples(extracted.uniqueColors);
-        setSamplePoints(sampled);
-
-        const allPixels = [];
-        for (let i = 0; i < totalPixels; i++) {
-            const x = (i % width) / width;
-            const y = Math.floor(i / width) / height;
-            const r = data[i * 4] / 255;
-            const g = data[i * 4 + 1] / 255;
-            const b = data[i * 4 + 2] / 255;
-            allPixels.push({ rgb: [r, g, b], xy: [x, y], index: i });
-        }
-
-        const centers = bindCenters(extracted.palette, allPixels);
-        setPixels(allPixels);
-        setClusters(centers);
-        setClusterCount(centers.length);
-
-        if (canvasRef.current) {
-            updateCanvasAndLayers(allPixels, centers, width, height);
-        }
-    };
-
-    const updateCanvasAndLayers = (pixels, centers, width, height) => {
+    const updateCanvasAndLayers = (pixelList, centers, width, height, paintMode) => {
         if (!canvasRef.current || centers.length === 0) return;
-
+        const modeName = paintMode || modeRef.current;
         const canvas = canvasRef.current;
         const ctx = canvas.getContext("2d");
-        const imageData = ctx.createImageData(width, height);
+        const frame = ctx.createImageData(width, height);
 
-        const startTime = performance.now(); // 시작 시간 측정
-        pixels.forEach((p) => {
+        const startTime = performance.now();
+        pixelList.forEach((p) => {
             const i = p.index * 4;
-            const swatch = centers[p.cluster].rgb;
-            const color = recolorPixel(
-                [p.rgb[0] * 255, p.rgb[1] * 255, p.rgb[2] * 255],
-                [swatch[0] * 255, swatch[1] * 255, swatch[2] * 255]
-            );
-            imageData.data[i] = Math.floor(color[0]);
-            imageData.data[i + 1] = Math.floor(color[1]);
-            imageData.data[i + 2] = Math.floor(color[2]);
-            imageData.data[i + 3] = 255;
+            const color = paintedChannels(p, centers[p.cluster], modeName);
+            frame.data[i] = color[0];
+            frame.data[i + 1] = color[1];
+            frame.data[i + 2] = color[2];
+            frame.data[i + 3] = 255;
         });
-        ctx.putImageData(imageData, 0, 0);
-        const endTime = performance.now(); // 종료 시간 측정
-        const timeTaken = (endTime - startTime).toFixed(2); // 소수점 2자리
-        setRecolorTime(timeTaken); // 시간 상태 업데이트
+        ctx.putImageData(frame, 0, 0);
+        const timeTaken = (performance.now() - startTime).toFixed(2);
+        setRecolorTime(timeTaken);
         setRecoloredImage(canvas.toDataURL());
 
         const layerCanvases = [];
-        // Pixels keep the swatch hue and their own lightness, so the existing
-        // recolor controls keep working without flattening a material to one
-        // mean. Full RGBXY additive layer decomposition (Tan, Echevarria,
-        // Gingold 2018) is the next step and is not done here.
+        // Manual mode fills each cluster with its mean. Automatic mode keeps
+        // the pixel's lightness and takes hue from the swatch. Full RGBXY
+        // additive layer decomposition is still a later step.
         for (let i = 0; i < centers.length; i++) {
             const layerCanvas = document.createElement("canvas");
             layerCanvas.width = width;
             layerCanvas.height = height;
             const layerCtx = layerCanvas.getContext("2d");
             const layerData = layerCtx.createImageData(width, height);
-            pixels.forEach((p) => {
+            pixelList.forEach((p) => {
                 const idx = p.index * 4;
                 if (p.cluster === i) {
-                    const swatch = centers[i].rgb;
-                    const color = recolorPixel(
-                        [p.rgb[0] * 255, p.rgb[1] * 255, p.rgb[2] * 255],
-                        [swatch[0] * 255, swatch[1] * 255, swatch[2] * 255]
-                    );
-                    layerData.data[idx] = Math.floor(color[0]);
-                    layerData.data[idx + 1] = Math.floor(color[1]);
-                    layerData.data[idx + 2] = Math.floor(color[2]);
+                    const color = paintedChannels(p, centers[i], modeName);
+                    layerData.data[idx] = color[0];
+                    layerData.data[idx + 1] = color[1];
+                    layerData.data[idx + 2] = color[2];
                     layerData.data[idx + 3] = 255;
                 } else {
                     layerData.data[idx + 3] = 0;
@@ -251,6 +261,144 @@ function App() {
         setLayerImages(layerCanvases);
     };
 
+    const runManual = (stored, count, nextColor, nextSpatial) => {
+        const { data, width, height } = stored;
+        let sampled = manualSamplesRef.current;
+        if (!sampled) {
+            const uniqueColorsWithXY = uniquePixels(data, width, height);
+            const maxSamples = 800000;
+            const numSamples = Math.min(maxSamples, uniqueColorsWithXY.length);
+            sampled = [];
+            for (let i = 0; i < numSamples; i++) {
+                const idx = Math.floor(Math.random() * uniqueColorsWithXY.length);
+                const { rgb, xy } = uniqueColorsWithXY[idx];
+                sampled.push({ rgb, xy });
+            }
+            manualSamplesRef.current = sampled;
+            console.log(
+                `Image size: ${width}x${height}, unique colors: ${uniqueColorsWithXY.length}, samples: ${numSamples}`
+            );
+        }
+        const centers = kMeansClustering(sampled, count, nextColor, nextSpatial, 50);
+        const allPixels = collectPixels(data, width, height);
+        allPixels.forEach((pixel) => {
+            pixel.cluster = rgbAssignCluster(pixel, centers, nextColor, nextSpatial);
+        });
+        setSamplePoints(sampled);
+        setPixels(allPixels);
+        setClusters(centers);
+        setClusterCount(count);
+        console.log(
+            "Manual k-means palette:",
+            centers.map((c) => c.rgb)
+        );
+        if (canvasRef.current) {
+            updateCanvasAndLayers(allPixels, centers, width, height, "manual");
+        }
+    };
+
+    const runAuto = (stored, nextColor, nextSpatial) => {
+        const { data, width, height } = stored;
+        const extracted = extractPaletteFromImageData(data);
+        console.log(
+            `Image size: ${width}x${height}, opaque unique colors: ${extracted.uniqueColors.length}`
+        );
+        console.log(
+            `In-image palette (${extracted.palette.length} colors, max ΔE ${extracted.maxDeltaE.toFixed(1)} / stop ${extracted.deltaEStop}):`,
+            extracted.palette
+        );
+        const allPixels = collectPixels(data, width, height);
+        const centers = paletteCenters(extracted.palette);
+        assignPalette(allPixels, centers, 0, 0);
+        applyCentroids(allPixels, centers);
+        assignPalette(allPixels, centers, nextColor, nextSpatial);
+        setSamplePoints(viewSamples(extracted.uniqueColors));
+        setPixels(allPixels);
+        setClusters(centers);
+        setClusterCount(centers.length);
+        if (canvasRef.current) {
+            updateCanvasAndLayers(allPixels, centers, width, height, "auto");
+        }
+    };
+
+    const runCurrent = (stored, nextMode, nextColor, nextSpatial, count) => {
+        if (!stored) return;
+        if (nextMode === "manual") runManual(stored, count, nextColor, nextSpatial);
+        else runAuto(stored, nextColor, nextSpatial);
+    };
+
+    const handleImageUpload = (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                const originalCanvas = document.createElement("canvas");
+                originalCanvas.width = img.width;
+                originalCanvas.height = img.height;
+                const originalCtx = originalCanvas.getContext("2d");
+                originalCtx.drawImage(img, 0, 0);
+                setImageData(originalCanvas.toDataURL());
+
+                const maxDimension = 2000;
+                let width = img.width;
+                let height = img.height;
+                if (width > maxDimension || height > maxDimension) {
+                    const aspect = width / height;
+                    if (width > height) {
+                        width = maxDimension;
+                        height = Math.round(maxDimension / aspect);
+                    } else {
+                        height = maxDimension;
+                        width = Math.round(maxDimension * aspect);
+                    }
+                }
+
+                const canvas = document.createElement("canvas");
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(img, 0, 0, width, height);
+                const decoded = ctx.getImageData(0, 0, width, height);
+                canvasRef.current = canvas;
+                manualSamplesRef.current = null;
+                const stored = {
+                    data: new Uint8ClampedArray(decoded.data),
+                    width,
+                    height,
+                };
+                imageRef.current = stored;
+                runCurrent(
+                    stored,
+                    modeRef.current,
+                    colorWeight,
+                    spatialWeight,
+                    manualCountRef.current
+                );
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const switchMode = (nextMode) => {
+        if (nextMode === modeRef.current) return;
+        modeRef.current = nextMode;
+        setMode(nextMode);
+        if (!imageRef.current) {
+            setClusterCount(nextMode === "manual" ? manualCountRef.current : clusterCount);
+            return;
+        }
+        runCurrent(
+            imageRef.current,
+            nextMode,
+            colorWeight,
+            spatialWeight,
+            manualCountRef.current
+        );
+    };
+
     const handleColorChange = (index, event) => {
         const newColor = event.target.value;
         const rgb = [
@@ -259,7 +407,7 @@ function App() {
             parseInt(newColor.slice(5, 7), 16) / 255,
         ];
         const newClusters = [...clusters];
-        newClusters[index].rgb = rgb;
+        newClusters[index] = { ...newClusters[index], rgb };
         setClusters(newClusters);
 
         setIsUpdating(true);
@@ -272,7 +420,8 @@ function App() {
                     pixels,
                     newClusters,
                     canvasRef.current.width,
-                    canvasRef.current.height
+                    canvasRef.current.height,
+                    modeRef.current
                 );
             }
             setIsUpdating(false);
@@ -282,6 +431,7 @@ function App() {
     const handleWeightChange = (type, value) => {
         let nextColor = colorWeight;
         let nextSpatial = spatialWeight;
+        let nextCount = manualCountRef.current;
         if (type === "color") {
             nextColor = Number.parseFloat(value);
             if (!Number.isFinite(nextColor)) return;
@@ -290,16 +440,28 @@ function App() {
             nextSpatial = Number.parseFloat(value);
             if (!Number.isFinite(nextSpatial)) return;
             setSpatialWeight(nextSpatial);
+        } else if (type === "clusterCount") {
+            if (modeRef.current !== "manual") return;
+            const parsed = Number.parseInt(value, 10);
+            if (!Number.isFinite(parsed)) return;
+            nextCount = Math.max(1, parsed);
+            manualCountRef.current = nextCount;
+            setClusterCount(nextCount);
         }
-        if (pixels.length > 0 && clusters.length > 0 && canvasRef.current) {
-            assignPalette(pixels, clusters, nextColor, nextSpatial);
-            updateCanvasAndLayers(
-                pixels,
-                clusters,
-                canvasRef.current.width,
-                canvasRef.current.height
-            );
+
+        if (!imageRef.current || pixels.length === 0 || !canvasRef.current) return;
+        if (modeRef.current === "manual") {
+            runManual(imageRef.current, nextCount, nextColor, nextSpatial);
+            return;
         }
+        assignPalette(pixels, clusters, nextColor, nextSpatial);
+        updateCanvasAndLayers(
+            pixels,
+            clusters,
+            canvasRef.current.width,
+            canvasRef.current.height,
+            "auto"
+        );
     };
 
     const copyToClipboard = (hex) => {
@@ -319,7 +481,8 @@ function App() {
                 pixels,
                 clusters,
                 canvasRef.current.width,
-                canvasRef.current.height
+                canvasRef.current.height,
+                modeRef.current
             );
         }
     }, [clusters, pixels, isUpdating]);
@@ -334,6 +497,29 @@ function App() {
             }}
         >
             <h1>컬러 팔레트 추출기</h1>
+            <div role="tablist" style={{ display: "flex", gap: "8px", margin: "10px" }}>
+                {[
+                    ["manual", "직접 설정"],
+                    ["auto", "자동 추출"],
+                ].map(([id, label]) => (
+                    <button
+                        key={id}
+                        type="button"
+                        role="tab"
+                        aria-selected={mode === id}
+                        onClick={() => switchMode(id)}
+                        style={{
+                            padding: "8px 16px",
+                            border: mode === id ? "2px solid #222" : "1px solid #bbb",
+                            background: mode === id ? "#222" : "#fff",
+                            color: mode === id ? "#fff" : "#222",
+                            cursor: "pointer",
+                        }}
+                    >
+                        {label}
+                    </button>
+                ))}
+            </div>
             <input
                 type="file"
                 accept="image/*"
@@ -346,9 +532,7 @@ function App() {
                 <input
                     type="number"
                     value={colorWeight}
-                    onChange={(e) =>
-                        handleWeightChange("color", e.target.value)
-                    }
+                    onChange={(e) => handleWeightChange("color", e.target.value)}
                     step="0.1"
                     min="0"
                 />
@@ -356,9 +540,7 @@ function App() {
                 <input
                     type="number"
                     value={spatialWeight}
-                    onChange={(e) =>
-                        handleWeightChange("spatial", e.target.value)
-                    }
+                    onChange={(e) => handleWeightChange("spatial", e.target.value)}
                     step="0.1"
                     min="0"
                 />
@@ -374,11 +556,7 @@ function App() {
                 {imageData && (
                     <div style={{ margin: "10px", textAlign: "center" }}>
                         <h2>원본 이미지</h2>
-                        <img
-                            src={imageData}
-                            alt="원본"
-                            style={{ maxWidth: "200px" }}
-                        />
+                        <img src={imageData} alt="원본" style={{ maxWidth: "200px" }} />
                     </div>
                 )}
                 {recoloredImage && (
@@ -401,7 +579,7 @@ function App() {
                         alignItems: "center",
                     }}
                 >
-                    <p>재색상화 시간: {recolorTime}ms</p> {/* 시간 표시 */}
+                    <p>재색상화 시간: {recolorTime}ms</p>
                     <Scene
                         points={samplePoints.map((p) => p.rgb)}
                         clusters={clusters.map((c) => c.rgb)}
@@ -412,9 +590,7 @@ function App() {
                             <input
                                 type="checkbox"
                                 checked={showConvexHull}
-                                onChange={(e) =>
-                                    setShowConvexHull(e.target.checked)
-                                }
+                                onChange={(e) => setShowConvexHull(e.target.checked)}
                             />
                             Show Convex Hull
                         </label>
@@ -426,13 +602,15 @@ function App() {
                 <input
                     type="number"
                     value={clusterCount}
-                    readOnly
+                    readOnly={mode === "auto"}
+                    onChange={(e) => handleWeightChange("clusterCount", e.target.value)}
+                    step="1"
+                    min="1"
                 />
             </div>
             {clusters.length > 0 && (
                 <div style={{ textAlign: "center", padding: "10px" }}>
                     <h2>대표 색상 팔레트</h2>
-
                     <div
                         style={{
                             display: "flex",
@@ -448,11 +626,9 @@ function App() {
                                 .padStart(2, "0")}${Math.floor(c.rgb[2] * 255)
                                 .toString(16)
                                 .padStart(2, "0")}`;
-                            // const percentage =
-                            //     clusterPercentages.get(c.originalIndex) || 0;
                             return (
                                 <div
-                                    key={i}
+                                    key={`${mode}-${i}`}
                                     style={{
                                         display: "flex",
                                         flexDirection: "column",
@@ -467,28 +643,17 @@ function App() {
                                         style={{
                                             width: "50px",
                                             height: "50px",
-                                            backgroundColor: `rgb(${Math.floor(
-                                                c.rgb[0] * 255
-                                            )}, ${Math.floor(
-                                                c.rgb[1] * 255
-                                            )}, ${Math.floor(c.rgb[2] * 255)})`,
+                                            backgroundColor: `rgb(${Math.floor(c.rgb[0] * 255)}, ${Math.floor(c.rgb[1] * 255)}, ${Math.floor(c.rgb[2] * 255)})`,
                                         }}
                                     />
                                     <input
                                         type="color"
                                         value={hex}
-                                        onChange={(e) =>
-                                            handleColorChange(i, e)
-                                        }
+                                        onChange={(e) => handleColorChange(i, e)}
                                     />
-                                    <button
-                                        onClick={() => copyToClipboard(hex)}
-                                    >
-                                        <span style={{}}>{hex}</span>
+                                    <button onClick={() => copyToClipboard(hex)}>
+                                        <span>{hex}</span>
                                     </button>
-                                    {/* <span style={{ marginLeft: "5px" }}>
-                                    ({percentage}%)
-                                </span> */}
                                 </div>
                             );
                         })}
@@ -509,10 +674,7 @@ function App() {
                 }}
             >
                 {layerImages.map((layer, i) => (
-                    <div
-                        key={i}
-                        style={{ margin: "10px", textAlign: "center" }}
-                    >
+                    <div key={`${mode}-layer-${i}`} style={{ margin: "10px", textAlign: "center" }}>
                         <h2>레이어 {i + 1}</h2>
                         <img
                             src={layer}
