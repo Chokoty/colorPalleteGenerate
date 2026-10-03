@@ -1,9 +1,11 @@
+import { convexHull3D } from "../src/rgbConvexPalette.js";
 import {
-    convexHull3D,
     extractPaletteFromColors,
-    reconstructionRmse,
-    histogramFromColors,
-} from "../src/rgbConvexPalette.js";
+    extractPaletteFromImageData,
+    deltaE76,
+    rgbToLab,
+    DELTA_E_STOP,
+} from "../src/imagePalette.js";
 
 let failures = 0;
 
@@ -164,142 +166,121 @@ console.log("--- convex hull ---");
     assert(setsMatch(hull.vertices, pyramid, 1e-6), "square pyramid keeps the coplanar base corners");
 }
 
-{
-    const corners = [
-        [0, 0, 0],
-        [255, 0, 0],
-        [0, 255, 0],
-        [0, 0, 255],
-        [255, 255, 0],
-        [255, 0, 255],
-        [0, 255, 255],
-        [255, 255, 255],
-    ];
-    const pixels = corners.flatMap((color) => Array.from({ length: 20 }, () => color));
-    const result = extractPaletteFromColors(pixels);
-    console.log("cube palette count", result.palette.length, "rmse", result.finalRmse);
-    assert(setsMatch(result.palette, corners, 0.05), "full RGB cube keeps its 8 hull vertices");
-}
-
 console.log("--- palette ---");
+
+function repeat(color, count) {
+    return Array.from({ length: count }, () => [color[0], color[1], color[2]]);
+}
+
+function nearestDelta(rgb, palette) {
+    const lab = rgbToLab(rgb[0], rgb[1], rgb[2]);
+    return Math.min(...palette.map((swatch) => deltaE76(lab, rgbToLab(swatch[0], swatch[1], swatch[2]))));
+}
+
 {
+    assert(DELTA_E_STOP === 18, "stop threshold is 18 CIE76 ΔE");
     const colors = [
         [10, 10, 10],
         [240, 20, 30],
         [30, 220, 40],
         [40, 30, 230],
     ];
-    const pixels = [];
-    for (const color of colors) {
-        for (let i = 0; i < 40; i++) pixels.push(color);
-    }
+    const pixels = colors.flatMap((color) => repeat(color, 40));
     const result = extractPaletteFromColors(pixels);
-    console.log("tetra palette", result);
-    assert(result.initialVertexCount === 4, "four flat colors start as a tetrahedron");
-    assert(setsMatch(result.palette, colors, 0.05), "palette is those four hull vertices, not cluster means");
+    console.log("flat colors", result.palette.length, result.palette);
+    assert(result.palette.length === 4, `four separated colors stay four (got ${result.palette.length})`);
+    assert(
+        colors.every((color) => nearestDelta(color, result.palette) < 1),
+        "each flat color is a swatch, not a gamut corner pulled off the pixel"
+    );
+    assert(!("targetVertexCount" in result), "palette result does not echo a requested count");
 }
 
 {
-    const corners = [
-        [10, 10, 10],
-        [240, 20, 30],
-        [30, 220, 40],
-        [40, 30, 230],
-    ];
-    const interior = [80, 70, 78];
-    const pixels = [];
-    for (const color of [...corners, interior]) {
-        for (let i = 0; i < 30; i++) pixels.push(color);
-    }
+    const skin = [234, 218, 218];
+    const shirt = [245, 232, 233];
+    const result = extractPaletteFromColors([...repeat(skin, 800), ...repeat(shirt, 400)]);
+    console.log("near duplicates", result.palette);
+    assert(result.palette.length === 1, `shades within the threshold share one swatch (got ${result.palette.length})`);
+    assert(nearestDelta(skin, result.palette) < DELTA_E_STOP, "merged swatch stays near the skin pixels");
+    assert(nearestDelta(shirt, result.palette) < DELTA_E_STOP, "merged swatch stays near the shirt pixels");
+}
+
+{
+    const brown = [126, 59, 31];
+    const pixels = [...repeat(brown, 5000), [255, 0, 0]];
     const result = extractPaletteFromColors(pixels);
-    console.log("filled tetra", {
-        initial: result.initialVertexCount,
-        palette: result.palette,
-        rmse: result.finalRmse,
-    });
-    assert(result.initialVertexCount === 4, "filled tetra hull has 4 vertices");
+    console.log("outlier", result.palette);
+    assert(result.palette.length === 1, "one stray primary does not become a swatch");
+    assert(nearestDelta(brown, result.palette) < 1, "the swatch is the brown that is actually in the image");
     assert(
-        setsMatch(result.palette, corners, 0.05),
-        "filled tetra palette is the corners, so an interior mix is not a palette color"
-    );
-    const mean = pixels.reduce((s, p) => [s[0] + p[0], s[1] + p[1], s[2] + p[2]], [0, 0, 0]).map((v) => v / pixels.length);
-    assert(
-        !result.palette.some((p) => samePoint(p, mean, 5)),
-        "palette does not contain the color centroid the way k-means would"
+        result.palette.every((swatch) => swatch[0] < 200),
+        "palette is not the pure red outlier"
     );
 }
 
 {
-    const sphere = [];
-    const center = [128, 128, 128];
-    const radius = 70;
-    for (let i = 0; i < 25; i++) {
-        const theta = Math.acos(1 - 2 * ((i + 0.5) / 25));
-        const phi = Math.PI * (1 + Math.sqrt(5)) * i;
-        sphere.push([
-            Math.round(center[0] + radius * Math.sin(theta) * Math.cos(phi)),
-            Math.round(center[1] + radius * Math.sin(theta) * Math.sin(phi)),
-            Math.round(center[2] + radius * Math.cos(theta)),
-        ]);
-    }
-    const result = extractPaletteFromColors(sphere);
-    console.log("sphere palette", {
-        initial: result.initialVertexCount,
-        count: result.palette.length,
-        palette: result.palette.map((p) => p.map((v) => Math.round(v * 10) / 10)),
-        rmse: result.finalRmse,
-    });
-    assert(result.initialVertexCount > 10, `sphere hull is richer than the palette (${result.initialVertexCount})`);
-    assert(result.palette.length < result.initialVertexCount, "simplification removes hull vertices");
-    assert(result.palette.length >= 4 && result.palette.length <= 12, `palette stays small (got ${result.palette.length})`);
-    assert(result.finalRmse <= 2 + 0.05 || result.palette.length <= 10, `RMSE ${result.finalRmse} respects the tolerance when more than a tetrahedron remains`);
-    const { bins } = histogramFromColors(sphere);
-    assert(reconstructionRmse(result.palette, bins) <= 2 + 0.05 || result.palette.length >= 4, "reported RMSE matches the binned distance");
+    const navy = [25, 48, 115];
+    const purple = [72, 50, 151];
+    const result = extractPaletteFromColors([...repeat(navy, 2000), ...repeat(purple, 2000)]);
+    assert(result.palette.length === 2, `navy and purple stay apart (got ${result.palette.length})`);
+    assert(nearestDelta(navy, result.palette) < 1, "navy swatch matches the navy pixels");
+    assert(nearestDelta(purple, result.palette) < 1, "purple swatch matches the purple pixels");
 }
 
 {
-    const single = extractPaletteFromColors([[20, 30, 40], [20, 30, 40]]);
+    const single = extractPaletteFromColors(repeat([20, 30, 40], 2));
     assert(setsMatch(single.palette, [[20, 30, 40]]), "one color stays one palette entry");
-    const pair = extractPaletteFromColors([
-        [0, 0, 0],
-        [255, 0, 0],
-    ]);
-    assert(setsMatch(pair.palette, [[0, 0, 0], [255, 0, 0]]), "two colors stay the segment endpoints");
+    const rgba = new Uint8ClampedArray(8 * 4);
+    for (let i = 0; i < 4; i++) {
+        rgba[i * 4] = 10;
+        rgba[i * 4 + 1] = 20;
+        rgba[i * 4 + 2] = 30;
+        rgba[i * 4 + 3] = i === 0 ? 0 : 255;
+    }
+    rgba[4 + 3] = 1;
+    rgba[4] = 255;
+    const fromImage = extractPaletteFromImageData(rgba);
+    assert(fromImage.palette.length === 1, "transparent fringe does not add a swatch");
+    assert(nearestDelta([10, 20, 30], fromImage.palette) < 1, "opaque pixels set the swatch");
 }
 
 {
-    // Recolor still indexes pixels by nearest palette color.
     const colors = [
-        [255, 0, 0],
-        [0, 255, 0],
-        [0, 0, 255],
-        [255, 255, 0],
+        [180, 40, 30],
+        [30, 160, 50],
+        [40, 50, 170],
+        [220, 180, 40],
     ];
-    const pixels = [];
-    for (const color of colors) {
-        for (let i = 0; i < 10; i++) pixels.push([...color]);
-    }
+    const pixels = colors.flatMap((color) => repeat(color, 30));
     const { palette } = extractPaletteFromColors(pixels);
-    const edited = palette.map((c) => [...c]);
-    const redIndex = edited.findIndex((c) => c[0] > 200 && c[1] < 40 && c[2] < 40);
-    assert(redIndex >= 0, "red hull vertex is present to edit");
+    const edited = palette.map((color) => [...color]);
+    const redIndex = edited.findIndex((color) => color[0] > 150 && color[1] < 80);
+    assert(redIndex >= 0, "red region is present to edit");
     edited[redIndex] = [0, 255, 255];
-    const recolored = pixels.map((p) => {
+    const recolored = pixels.map((pixel) => {
         let best = 0;
         let bestD = Infinity;
-        palette.forEach((c, i) => {
-            const d = (p[0] - c[0]) ** 2 + (p[1] - c[1]) ** 2 + (p[2] - c[2]) ** 2;
-            if (d < bestD) {
-                bestD = d;
-                best = i;
+        palette.forEach((color, index) => {
+            const distance =
+                (pixel[0] - color[0]) ** 2 +
+                (pixel[1] - color[1]) ** 2 +
+                (pixel[2] - color[2]) ** 2;
+            if (distance < bestD) {
+                bestD = distance;
+                best = index;
             }
         });
         return edited[best];
     });
-    const reds = recolored.slice(0, 10);
-    assert(reds.every((c) => samePoint(c, [0, 255, 255], 1e-6)), "changing the red palette entry recolors its pixels");
-    const greens = recolored.slice(10, 20);
-    assert(greens.every((c) => c[1] > 200 && c[0] < 40), "other palette entries stay put");
+    assert(
+        recolored.slice(0, 30).every((color) => samePoint(color, [0, 255, 255], 1e-6)),
+        "changing one palette entry recolors its pixels"
+    );
+    assert(
+        recolored.slice(30, 60).every((color) => color[1] > 140 && color[0] < 50),
+        "other palette entries stay put"
+    );
 }
 
 if (failures) {

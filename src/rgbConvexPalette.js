@@ -1,12 +1,8 @@
-// Palette extraction from Tan, Echevarria, and Gingold,
+// RGB convex-hull geometry from Tan, Echevarria, and Gingold,
 // "Efficient palette-based decomposition and recoloring of images via
 // RGBXY-space geometry" (SIGGRAPH Asia 2018), Section 3.1.
-//
-// The palette is the vertex set of the image's RGB convex hull after
-// greedy progressive-hull simplification (minimum added volume, then
-// clip out-of-gamut vertices to the RGB cube). Automatic size selection
-// stops before the binned reconstruction RMSE exceeds η = 2/255.
-// RGBXY additive layer decomposition is a separate later step.
+// The app palette is chosen in imagePalette.js. Hull vertices sit on the
+// gamut and were the wrong swatches for this extractor.
 
 const BIN_COUNT = 32;
 const BIN_VOLUME = BIN_COUNT * BIN_COUNT * BIN_COUNT;

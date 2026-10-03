@@ -1,9 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import Scene from "./Scene";
-import {
-    extractPaletteFromImageData,
-    simplifyRgbHull,
-} from "./rgbConvexPalette";
+import { extractPaletteFromImageData } from "./imagePalette";
 
 function assignCluster(point, centers, colorWeight, spatialWeight) {
     let minDist = Infinity;
@@ -35,7 +32,7 @@ function assignPalette(pixels, centers, colorWeight, spatialWeight) {
 }
 
 // XY anchors are the centroids of the RGB Voronoi cells. The palette colors
-// themselves stay on the simplified hull; spatial weight only affects assignment.
+// stay the extracted means; spatial weight only affects assignment.
 function applyCentroids(pixels, centers) {
     const sums = centers.map(() => [0, 0, 0]);
     for (const pixel of pixels) {
@@ -87,13 +84,12 @@ function App() {
     const [isUpdating, setIsUpdating] = useState(false);
     const [colorWeight, setColorWeight] = useState(1.0);
     const [spatialWeight, setSpatialWeight] = useState(0.1);
-    const [clusterCount, setClusterCount] = useState(6); // 클러스터 개수 상태 추가
+    const [clusterCount, setClusterCount] = useState(0);
     const [enableDamping, setEnableDamping] = useState(true);
     const [showConvexHull, setShowConvexHull] = useState(true);
     const fileInputRef = useRef(null);
     const canvasRef = useRef(null);
     const debounceTimeoutRef = useRef(null);
-    const geometryRef = useRef(null);
 
     const handleImageUpload = (event) => {
         const file = event.target.files[0];
@@ -149,17 +145,12 @@ function App() {
     const processImage = (data, width, height) => {
         const totalPixels = width * height;
         const extracted = extractPaletteFromImageData(data);
-        geometryRef.current = {
-            uniqueColors: extracted.uniqueColors,
-            bins: extracted.bins,
-        };
         console.log(
-            `Image size: ${width}x${height}, opaque unique colors: ${extracted.uniqueColors.length}, hull vertices: ${extracted.initialVertexCount}`
+            `Image size: ${width}x${height}, opaque unique colors: ${extracted.uniqueColors.length}`
         );
         console.log(
-            "Simplified RGB convex-hull palette:",
-            extracted.palette,
-            `RMSE ${extracted.finalRmse.toFixed(3)}`
+            `In-image palette (${extracted.palette.length} colors, max ΔE ${extracted.maxDeltaE.toFixed(1)} / stop ${extracted.deltaEStop}):`,
+            extracted.palette
         );
 
         const sampled = viewSamples(extracted.uniqueColors);
@@ -274,29 +265,7 @@ function App() {
             nextSpatial = Number.parseFloat(value);
             if (!Number.isFinite(nextSpatial)) return;
             setSpatialWeight(nextSpatial);
-        } else if (type === "clusterCount") {
-            const parsed = Number.parseInt(value, 10);
-            if (!Number.isFinite(parsed) || !geometryRef.current) return;
-            const requested = Math.max(1, parsed);
-            setClusterCount(requested);
-            if (pixels.length === 0 || !canvasRef.current) return;
-            const palette = simplifyRgbHull(
-                geometryRef.current.uniqueColors,
-                geometryRef.current.bins,
-                { targetVertexCount: requested }
-            );
-            const centers = bindCenters(palette, pixels);
-            setClusters(centers);
-            setClusterCount(centers.length);
-            updateCanvasAndLayers(
-                pixels,
-                centers,
-                canvasRef.current.width,
-                canvasRef.current.height
-            );
-            return;
         }
-
         if (pixels.length > 0 && clusters.length > 0 && canvasRef.current) {
             assignPalette(pixels, clusters, nextColor, nextSpatial);
             updateCanvasAndLayers(
@@ -432,11 +401,7 @@ function App() {
                 <input
                     type="number"
                     value={clusterCount}
-                    onChange={(e) =>
-                        handleWeightChange("clusterCount", e.target.value)
-                    }
-                    step="1"
-                    min="1"
+                    readOnly
                 />
             </div>
             {clusters.length > 0 && (
