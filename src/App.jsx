@@ -1,16 +1,18 @@
 import { useState, useRef, useEffect } from "react";
 import Scene from "./Scene";
-import { extractPaletteFromImageData } from "./imagePalette";
+import {
+    extractPaletteFromImageData,
+    paletteColorDistance2,
+    recolorPixel,
+    rgbToLab,
+} from "./imagePalette";
 
 function assignCluster(point, centers, colorWeight, spatialWeight) {
     let minDist = Infinity;
     let clusterIdx = 0;
     for (let i = 0; i < centers.length; i++) {
         const center = centers[i];
-        const colorSquaredDist =
-            (point.rgb[0] - center.rgb[0]) ** 2 +
-            (point.rgb[1] - center.rgb[1]) ** 2 +
-            (point.rgb[2] - center.rgb[2]) ** 2;
+        const colorSquaredDist = paletteColorDistance2(point.lab, center.lab);
         const spatialSquaredDist =
             (point.xy[0] - center.xy[0]) ** 2 +
             (point.xy[1] - center.xy[1]) ** 2;
@@ -26,7 +28,21 @@ function assignCluster(point, centers, colorWeight, spatialWeight) {
 }
 
 function assignPalette(pixels, centers, colorWeight, spatialWeight) {
+    for (const center of centers) {
+        center.lab = rgbToLab(
+            center.rgb[0] * 255,
+            center.rgb[1] * 255,
+            center.rgb[2] * 255
+        );
+    }
     for (const pixel of pixels) {
+        if (!pixel.lab) {
+            pixel.lab = rgbToLab(
+                pixel.rgb[0] * 255,
+                pixel.rgb[1] * 255,
+                pixel.rgb[2] * 255
+            );
+        }
         pixel.cluster = assignCluster(pixel, centers, colorWeight, spatialWeight);
     }
 }
@@ -186,10 +202,14 @@ function App() {
         const startTime = performance.now(); // 시작 시간 측정
         pixels.forEach((p) => {
             const i = p.index * 4;
-            const color = centers[p.cluster].rgb;
-            imageData.data[i] = Math.floor(color[0] * 255);
-            imageData.data[i + 1] = Math.floor(color[1] * 255);
-            imageData.data[i + 2] = Math.floor(color[2] * 255);
+            const swatch = centers[p.cluster].rgb;
+            const color = recolorPixel(
+                [p.rgb[0] * 255, p.rgb[1] * 255, p.rgb[2] * 255],
+                [swatch[0] * 255, swatch[1] * 255, swatch[2] * 255]
+            );
+            imageData.data[i] = Math.floor(color[0]);
+            imageData.data[i + 1] = Math.floor(color[1]);
+            imageData.data[i + 2] = Math.floor(color[2]);
             imageData.data[i + 3] = 255;
         });
         ctx.putImageData(imageData, 0, 0);
@@ -199,9 +219,10 @@ function App() {
         setRecoloredImage(canvas.toDataURL());
 
         const layerCanvases = [];
-        // Hard assignment of pixels to palette colors, so the existing recolor
-        // controls keep working. Full RGBXY additive layer decomposition
-        // (Tan, Echevarria, Gingold 2018) is the next step and is not done here.
+        // Pixels keep the swatch hue and their own lightness, so the existing
+        // recolor controls keep working without flattening a material to one
+        // mean. Full RGBXY additive layer decomposition (Tan, Echevarria,
+        // Gingold 2018) is the next step and is not done here.
         for (let i = 0; i < centers.length; i++) {
             const layerCanvas = document.createElement("canvas");
             layerCanvas.width = width;
@@ -211,10 +232,14 @@ function App() {
             pixels.forEach((p) => {
                 const idx = p.index * 4;
                 if (p.cluster === i) {
-                    const color = centers[i].rgb;
-                    layerData.data[idx] = Math.floor(color[0] * 255);
-                    layerData.data[idx + 1] = Math.floor(color[1] * 255);
-                    layerData.data[idx + 2] = Math.floor(color[2] * 255);
+                    const swatch = centers[i].rgb;
+                    const color = recolorPixel(
+                        [p.rgb[0] * 255, p.rgb[1] * 255, p.rgb[2] * 255],
+                        [swatch[0] * 255, swatch[1] * 255, swatch[2] * 255]
+                    );
+                    layerData.data[idx] = Math.floor(color[0]);
+                    layerData.data[idx + 1] = Math.floor(color[1]);
+                    layerData.data[idx + 2] = Math.floor(color[2]);
                     layerData.data[idx + 3] = 255;
                 } else {
                     layerData.data[idx + 3] = 0;

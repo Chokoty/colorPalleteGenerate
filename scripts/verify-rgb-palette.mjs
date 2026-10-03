@@ -5,6 +5,8 @@ import {
     deltaE76,
     rgbToLab,
     DELTA_E_STOP,
+    paletteColorDistance2,
+    recolorPixel,
 } from "../src/imagePalette.js";
 
 let failures = 0;
@@ -280,6 +282,40 @@ function nearestDelta(rgb, palette) {
     assert(
         recolored.slice(30, 60).every((color) => color[1] > 140 && color[0] < 50),
         "other palette entries stay put"
+    );
+}
+
+{
+    const dress = [56.5, 47.7, 48.6];
+    const shadow = [33, 26, 27];
+    const body = [58, 49, 50];
+    const paintedShadow = recolorPixel(shadow, dress);
+    const paintedBody = recolorPixel(body, dress);
+    const shadowL = rgbToLab(...paintedShadow)[0];
+    const bodyL = rgbToLab(...paintedBody)[0];
+    console.log("skirt shade", paintedShadow.map((v) => v.toFixed(1)), "L", shadowL.toFixed(1), bodyL.toFixed(1));
+    assert(bodyL - shadowL > 6, `skirt shadow stays darker than the dress body (${shadowL.toFixed(1)} vs ${bodyL.toFixed(1)})`);
+    assert(
+        paintedShadow.every((channel, i) => Math.abs(channel - shadow[i]) < 8),
+        "shadow color stays near the dark pixels in the dress"
+    );
+
+    const skin = [235, 220, 221];
+    const pink = [242, 183, 146];
+    const shadedSkin = [210, 186, 184];
+    const skinLab = rgbToLab(...skin);
+    const pinkLab = rgbToLab(...pink);
+    const shadedLab = rgbToLab(...shadedSkin);
+    assert(
+        paletteColorDistance2(shadedLab, skinLab) < paletteColorDistance2(shadedLab, pinkLab),
+        "shaded skin stays with the skin swatch instead of the pink one"
+    );
+    const paintedSkin = recolorPixel(shadedSkin, skin);
+    const paintedPink = recolorPixel(pink, pink);
+    assert(rgbToLab(...paintedSkin)[0] < rgbToLab(...skin)[0] - 4, "shaded skin stays darker than the skin mean");
+    assert(
+        deltaE76(rgbToLab(...paintedPink), pinkLab) < 8,
+        "a real pink pixel is not repainted as pale skin"
     );
 }
 
