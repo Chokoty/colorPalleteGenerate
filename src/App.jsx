@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Scene from "./Scene";
 import {
     DELTA_E_STOP,
@@ -7,6 +7,7 @@ import {
     recolorPixel,
     rgbToLab,
 } from "./imagePalette";
+import { contourMask, dilate, gradientEdges } from "./imageOutline";
 
 // Main-branch extraction: the user picks k, and centers are k-means means
 // of sampled RGB+XY points. Recolor fills each pixel with its center.
@@ -246,10 +247,15 @@ function App() {
     const [opaqueShares, setOpaqueShares] = useState([]);
     const [deltaEStop, setDeltaEStop] = useState(DELTA_E_STOP);
     const [showConvexHull, setShowConvexHull] = useState(true);
+    const [showContour, setShowContour] = useState(false);
+    const [showLines, setShowLines] = useState(false);
     const fileInputRef = useRef(null);
     const canvasRef = useRef(null);
     const debounceTimeoutRef = useRef(null);
     const imageRef = useRef(null);
+    const previewRef = useRef(null);
+    const sourceImgRef = useRef(null);
+    const outlineCanvasRef = useRef(null);
     const manualSamplesRef = useRef(null);
     const manualCountRef = useRef(6);
     const modeRef = useRef("manual");
@@ -384,6 +390,12 @@ function App() {
                 originalCanvas.height = img.height;
                 const originalCtx = originalCanvas.getContext("2d");
                 originalCtx.drawImage(img, 0, 0);
+                const preview = originalCtx.getImageData(0, 0, img.width, img.height);
+                previewRef.current = {
+                    data: new Uint8ClampedArray(preview.data),
+                    width: img.width,
+                    height: img.height,
+                };
                 setImageData(originalCanvas.toDataURL());
 
                 const maxDimension = 2000;
@@ -517,6 +529,54 @@ function App() {
         });
     };
 
+    const paintSourceOverlay = useCallback(() => {
+        const preview = previewRef.current;
+        const canvas = outlineCanvasRef.current;
+        const image = sourceImgRef.current;
+        if (!preview || !canvas || !image) return;
+        const width = image.clientWidth;
+        const height = image.clientHeight;
+        if (!width || !height) return;
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, width, height);
+        if (!showContour && !showLines) return;
+
+        const source = document.createElement("canvas");
+        source.width = preview.width;
+        source.height = preview.height;
+        source.getContext("2d").putImageData(
+            new ImageData(new Uint8ClampedArray(preview.data), preview.width, preview.height),
+            0,
+            0
+        );
+        const view = document.createElement("canvas");
+        view.width = width;
+        view.height = height;
+        const viewCtx = view.getContext("2d");
+        viewCtx.drawImage(source, 0, 0, width, height);
+        const scaled = viewCtx.getImageData(0, 0, width, height);
+        const frame = ctx.createImageData(width, height);
+        const stamp = (mask, color) => {
+            for (let i = 0; i < mask.length; i++) {
+                if (!mask[i]) continue;
+                const offset = i * 4;
+                frame.data[offset] = color[0];
+                frame.data[offset + 1] = color[1];
+                frame.data[offset + 2] = color[2];
+                frame.data[offset + 3] = 230;
+            }
+        };
+        if (showLines) stamp(gradientEdges(scaled.data, width, height), [25, 25, 25]);
+        if (showContour) stamp(dilate(contourMask(scaled.data, width, height), width, height, 1), [12, 12, 12]);
+        ctx.putImageData(frame, 0, 0);
+    }, [showContour, showLines]);
+
+    useEffect(() => {
+        paintSourceOverlay();
+    }, [paintSourceOverlay, imageData]);
+
     useEffect(() => {
         if (
             !isUpdating &&
@@ -614,9 +674,28 @@ function App() {
                     {imageData && (
                         <div style={{ textAlign: "center" }}>
                             <h2>원본 이미지</h2>
+                            <div style={{ display: "flex", gap: "16px", justifyContent: "center", margin: "8px 0 10px" }}>
+                                <label>
+                                    <input
+                                        type="checkbox"
+                                        checked={showContour}
+                                        onChange={(e) => setShowContour(e.target.checked)}
+                                    />
+                                    {" 윤곽선"}
+                                </label>
+                                <label>
+                                    <input
+                                        type="checkbox"
+                                        checked={showLines}
+                                        onChange={(e) => setShowLines(e.target.checked)}
+                                    />
+                                    {" 선 필터"}
+                                </label>
+                            </div>
                             <div
                                 style={{
                                     display: "inline-block",
+                                    position: "relative",
                                     lineHeight: 0,
                                     backgroundColor: "#f5f5f5",
                                     backgroundImage:
@@ -626,9 +705,21 @@ function App() {
                                 }}
                             >
                                 <img
+                                    ref={sourceImgRef}
                                     src={imageData}
                                     alt="원본"
+                                    onLoad={paintSourceOverlay}
                                     style={{ maxHeight: "640px", maxWidth: "100%", height: "auto" }}
+                                />
+                                <canvas
+                                    ref={outlineCanvasRef}
+                                    style={{
+                                        position: "absolute",
+                                        inset: 0,
+                                        width: "100%",
+                                        height: "100%",
+                                        pointerEvents: "none",
+                                    }}
                                 />
                             </div>
                         </div>
