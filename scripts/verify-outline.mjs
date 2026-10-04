@@ -1,4 +1,4 @@
-import { contourMask, gradientEdges, hasTransparentBackground } from "../src/imageOutline.js";
+import { blackHatInk, contourMask, gradientEdges, hasTransparentBackground } from "../src/imageOutline.js";
 
 function assert(condition, message) {
     if (!condition) throw new Error(message);
@@ -101,6 +101,27 @@ function points(mask, width) {
     assert(onStep > 10, `the luminance step becomes a line (got ${onStep})`);
     assert(elsewhere === 0, "a flat region does not become a line");
     console.log("ok: line filter keeps a hard edge and ignores a flat fill");
+}
+
+{
+    const width = 80;
+    const height = 48;
+    const data = rgba(width, height, (x, y) => {
+        if (x === 20) return [12, 12, 12, 255];
+        if (x > 48 && x < 68) return [206, 190, 186, 255];
+        return [230, 214, 206, 255];
+    });
+    const ink = blackHatInk(data, width, height);
+    let line = 0;
+    let blush = 0;
+    for (let y = 8; y < 40; y++) {
+        if (ink[y * width + 20]) line++;
+        if (ink[y * width + 58]) blush++;
+    }
+    assert(line > 20, `black ink stays (got ${line})`);
+    assert(blush === 0, "a gentle blush is not ink");
+    assert(!ink[10 * width + 8], "a flat light pixel is not ink");
+    console.log("ok: ink extract keeps a dark line and drops a soft blush");
 }
 
 console.log("outline checks passed");

@@ -322,3 +322,82 @@ export function gradientEdges(data, width, height) {
     }
     return edges;
 }
+
+// Black-hat style ink: a pixel stays only when it is clearly darker than a
+// wide blur of the picture. Soft blush and gentle shadows sit near that blur
+// and drop out. Colored lines that are not darker are missed, and a large
+// dark region such as hair can fill in. This is not a difference of Gaussians.
+const INK_THRESHOLD = 48;
+
+function blurOpaque(src, mask, width, height, radius, horizontal) {
+    const out = new Float32Array(src.length);
+    if (horizontal) {
+        const sum = new Float64Array(width + 1);
+        const count = new Float64Array(width + 1);
+        for (let y = 0; y < height; y++) {
+            const row = y * width;
+            sum[0] = 0;
+            count[0] = 0;
+            for (let x = 0; x < width; x++) {
+                const index = row + x;
+                sum[x + 1] = sum[x] + (mask[index] ? src[index] : 0);
+                count[x + 1] = count[x] + (mask[index] ? 1 : 0);
+            }
+            for (let x = 0; x < width; x++) {
+                const index = row + x;
+                if (!mask[index]) continue;
+                const left = Math.max(0, x - radius);
+                const right = Math.min(width, x + radius + 1);
+                const samples = count[right] - count[left];
+                out[index] = samples > 0 ? (sum[right] - sum[left]) / samples : src[index];
+            }
+        }
+        return out;
+    }
+    const sum = new Float64Array(height + 1);
+    const count = new Float64Array(height + 1);
+    for (let x = 0; x < width; x++) {
+        sum[0] = 0;
+        count[0] = 0;
+        for (let y = 0; y < height; y++) {
+            const index = y * width + x;
+            sum[y + 1] = sum[y] + (mask[index] ? src[index] : 0);
+            count[y + 1] = count[y] + (mask[index] ? 1 : 0);
+        }
+        for (let y = 0; y < height; y++) {
+            const index = y * width + x;
+            if (!mask[index]) continue;
+            const top = Math.max(0, y - radius);
+            const bottom = Math.min(height, y + radius + 1);
+            const samples = count[bottom] - count[top];
+            out[index] = samples > 0 ? (sum[bottom] - sum[top]) / samples : src[index];
+        }
+    }
+    return out;
+}
+
+export function blackHatInk(data, width, height) {
+    const count = width * height;
+    const lum = new Float32Array(count);
+    const opaque = new Uint8Array(count);
+    for (let i = 0; i < count; i++) {
+        const offset = i * 4;
+        if (data[offset + 3] < ALPHA_FG) continue;
+        opaque[i] = 1;
+        lum[i] = data[offset] * 0.299 + data[offset + 1] * 0.587 + data[offset + 2] * 0.114;
+    }
+    const radius = Math.max(4, Math.round(height / 80));
+    const blurred = blurOpaque(
+        blurOpaque(lum, opaque, width, height, radius, true),
+        opaque,
+        width,
+        height,
+        radius,
+        false
+    );
+    const ink = new Uint8Array(count);
+    for (let i = 0; i < count; i++) {
+        if (opaque[i] && blurred[i] - lum[i] > INK_THRESHOLD) ink[i] = 1;
+    }
+    return ink;
+}

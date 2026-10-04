@@ -7,7 +7,7 @@ import {
     recolorPixel,
     rgbToLab,
 } from "./imagePalette";
-import { contourMask, dilate, gradientEdges } from "./imageOutline";
+import { blackHatInk, contourMask, dilate, gradientEdges } from "./imageOutline";
 
 // Main-branch extraction: the user picks k, and centers are k-means means
 // of sampled RGB+XY points. Recolor fills each pixel with its center.
@@ -249,6 +249,7 @@ function App() {
     const [showConvexHull, setShowConvexHull] = useState(true);
     const [showContour, setShowContour] = useState(false);
     const [showLines, setShowLines] = useState(false);
+    const [showInk, setShowInk] = useState(false);
     const fileInputRef = useRef(null);
     const canvasRef = useRef(null);
     const debounceTimeoutRef = useRef(null);
@@ -541,7 +542,7 @@ function App() {
         canvas.height = height;
         const ctx = canvas.getContext("2d");
         ctx.clearRect(0, 0, width, height);
-        if (!showContour && !showLines) return;
+        if (!showContour && !showLines && !showInk) return;
 
         const source = document.createElement("canvas");
         source.width = preview.width;
@@ -558,20 +559,26 @@ function App() {
         viewCtx.drawImage(source, 0, 0, width, height);
         const scaled = viewCtx.getImageData(0, 0, width, height);
         const frame = ctx.createImageData(width, height);
-        const stamp = (mask, color) => {
+        const stamp = (mask, color, alpha) => {
             for (let i = 0; i < mask.length; i++) {
                 if (!mask[i]) continue;
                 const offset = i * 4;
                 frame.data[offset] = color[0];
                 frame.data[offset + 1] = color[1];
                 frame.data[offset + 2] = color[2];
-                frame.data[offset + 3] = 230;
+                frame.data[offset + 3] = alpha;
             }
         };
-        if (showLines) stamp(gradientEdges(scaled.data, width, height), [25, 25, 25]);
-        if (showContour) stamp(dilate(contourMask(scaled.data, width, height), width, height, 1), [12, 12, 12]);
+        if (showInk) {
+            frame.data.fill(255);
+            stamp(blackHatInk(scaled.data, width, height), [0, 0, 0], 255);
+        }
+        if (showLines) stamp(gradientEdges(scaled.data, width, height), [25, 25, 25], 230);
+        if (showContour) {
+            stamp(dilate(contourMask(scaled.data, width, height), width, height, 1), [12, 12, 12], 230);
+        }
         ctx.putImageData(frame, 0, 0);
-    }, [showContour, showLines]);
+    }, [showContour, showLines, showInk]);
 
     useEffect(() => {
         paintSourceOverlay();
@@ -690,6 +697,14 @@ function App() {
                                         onChange={(e) => setShowLines(e.target.checked)}
                                     />
                                     {" 선 필터"}
+                                </label>
+                                <label>
+                                    <input
+                                        type="checkbox"
+                                        checked={showInk}
+                                        onChange={(e) => setShowInk(e.target.checked)}
+                                    />
+                                    {" 선화 추출"}
                                 </label>
                             </div>
                             <div
