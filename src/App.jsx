@@ -7,7 +7,7 @@ import {
     recolorPixel,
     rgbToLab,
 } from "./imagePalette";
-import { blackHatInk, contourMask, dilate, gradientEdges } from "./imageOutline";
+import { contourMask, dilate, flatRegionLines, gradientEdges } from "./imageOutline";
 
 // Main-branch extraction: the user picks k, and centers are k-means means
 // of sampled RGB+XY points. Recolor fills each pixel with its center.
@@ -571,7 +571,7 @@ function App() {
         };
         if (showInk) {
             frame.data.fill(255);
-            stamp(blackHatInk(scaled.data, width, height), [0, 0, 0], 255);
+            stamp(flatRegionLines(scaled.data, width, height), [0, 0, 0], 255);
         }
         if (showLines) stamp(gradientEdges(scaled.data, width, height), [25, 25, 25], 230);
         if (showContour) {

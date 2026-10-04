@@ -1,4 +1,4 @@
-import { blackHatInk, contourMask, gradientEdges, hasTransparentBackground } from "../src/imageOutline.js";
+import { contourMask, flatRegionLines, gradientEdges, hasTransparentBackground } from "../src/imageOutline.js";
 
 function assert(condition, message) {
     if (!condition) throw new Error(message);
@@ -104,24 +104,42 @@ function points(mask, width) {
 }
 
 {
-    const width = 80;
-    const height = 48;
+    const width = 48;
+    const height = 40;
     const data = rgba(width, height, (x, y) => {
-        if (x === 20) return [12, 12, 12, 255];
-        if (x > 48 && x < 68) return [206, 190, 186, 255];
-        return [230, 214, 206, 255];
+        if (x >= 16 && x < 34 && y >= 8 && y < 32) return [24, 20, 28, 255];
+        return [246, 214, 78, 255];
     });
-    const ink = blackHatInk(data, width, height);
-    let line = 0;
-    let blush = 0;
-    for (let y = 8; y < 40; y++) {
-        if (ink[y * width + 20]) line++;
-        if (ink[y * width + 58]) blush++;
-    }
-    assert(line > 20, `black ink stays (got ${line})`);
-    assert(blush === 0, "a gentle blush is not ink");
-    assert(!ink[10 * width + 8], "a flat light pixel is not ink");
-    console.log("ok: ink extract keeps a dark line and drops a soft blush");
+    const lines = flatRegionLines(data, width, height);
+    assert(lines[7 * width + 24], "the edge of a flat dark area is a line");
+    assert(!lines[18 * width + 24], "the inside of a flat dark area is not filled");
+    assert(!lines[4 * width + 4], "the flat background is not a line");
+    console.log("ok: a flat dark region stays an outline");
+}
+
+{
+    const width = 48;
+    const height = 24;
+    const data = rgba(width, height, (x) => {
+        const gray = 170 + Math.round((x / (width - 1)) * 28);
+        return [gray, gray - 6, gray - 10, 255];
+    });
+    const lines = flatRegionLines(data, width, height);
+    const marked = lines.reduce((sum, value) => sum + value, 0);
+    assert(marked === 0, `a gentle gradient is not a line (got ${marked})`);
+    console.log("ok: gentle shading does not become a line");
+}
+
+{
+    const width = 40;
+    const height = 24;
+    const data = rgba(width, height, (x) => (x < 20 ? [236, 206, 196, 255] : [36, 48, 150, 255]));
+    const lines = flatRegionLines(data, width, height);
+    let boundary = 0;
+    for (let y = 0; y < height; y++) if (lines[y * width + 19]) boundary++;
+    assert(boundary === height, "a real color boundary is a line");
+    assert(!lines[4 * width + 4] && !lines[4 * width + 30], "both flat sides stay white");
+    console.log("ok: a hard color change becomes one line");
 }
 
 console.log("outline checks passed");

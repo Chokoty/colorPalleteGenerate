@@ -1,3 +1,5 @@
+import { rgbToLab } from "./imagePalette.js";
+
 // Preview strokes for the uploaded image. This does not choose palette colors.
 // A transparent background uses the alpha boundary. An opaque flat background
 // uses the outer edge of the largest region that is not that background.
@@ -323,81 +325,114 @@ export function gradientEdges(data, width, height) {
     return edges;
 }
 
-// Black-hat style ink: a pixel stays only when it is clearly darker than a
-// wide blur of the picture. Soft blush and gentle shadows sit near that blur
-// and drop out. Colored lines that are not darker are missed, and a large
-// dark region such as hair can fill in. This is not a difference of Gaussians.
-const INK_THRESHOLD = 48;
+// Line art from flat color regions. A small edge-preserving average pulls
+// blush and gentle shading into the surrounding color. What remains is a
+// boundary: a hue change, a jump from gray to color, or a hard lightness
+// step such as ink. A large flat area (hair, dress) contributes only its
+// outline. Transparent pixels are the background, so the silhouette is the
+// alpha edge.
+const FLATTEN_DE = 16;
+const HUE_EDGE = 28;
+const LIGHT_EDGE = 36;
+const CHROMA_EDGE = 24;
+const MIN_CHROMA = 16;
 
-function blurOpaque(src, mask, width, height, radius, horizontal) {
-    const out = new Float32Array(src.length);
-    if (horizontal) {
-        const sum = new Float64Array(width + 1);
-        const count = new Float64Array(width + 1);
+function flattenLab(L, A, B, opaque, width, height) {
+    const count = width * height;
+    const limit = FLATTEN_DE * FLATTEN_DE;
+    let curL = L;
+    let curA = A;
+    let curB = B;
+    for (let pass = 0; pass < 2; pass++) {
+        const nextL = new Float32Array(count);
+        const nextA = new Float32Array(count);
+        const nextB = new Float32Array(count);
         for (let y = 0; y < height; y++) {
-            const row = y * width;
-            sum[0] = 0;
-            count[0] = 0;
             for (let x = 0; x < width; x++) {
-                const index = row + x;
-                sum[x + 1] = sum[x] + (mask[index] ? src[index] : 0);
-                count[x + 1] = count[x] + (mask[index] ? 1 : 0);
+                const index = y * width + x;
+                if (!opaque[index]) continue;
+                let sumL = 0;
+                let sumA = 0;
+                let sumB = 0;
+                let samples = 0;
+                for (let dy = -2; dy <= 2; dy++) {
+                    const ny = y + dy;
+                    if (ny < 0 || ny >= height) continue;
+                    for (let dx = -2; dx <= 2; dx++) {
+                        const nx = x + dx;
+                        if (nx < 0 || nx >= width) continue;
+                        const neighbor = ny * width + nx;
+                        if (!opaque[neighbor]) continue;
+                        const dL = curL[neighbor] - curL[index];
+                        const dA = curA[neighbor] - curA[index];
+                        const dB = curB[neighbor] - curB[index];
+                        if (dL * dL + dA * dA + dB * dB > limit) continue;
+                        sumL += curL[neighbor];
+                        sumA += curA[neighbor];
+                        sumB += curB[neighbor];
+                        samples++;
+                    }
+                }
+                nextL[index] = sumL / samples;
+                nextA[index] = sumA / samples;
+                nextB[index] = sumB / samples;
             }
-            for (let x = 0; x < width; x++) {
-                const index = row + x;
-                if (!mask[index]) continue;
-                const left = Math.max(0, x - radius);
-                const right = Math.min(width, x + radius + 1);
-                const samples = count[right] - count[left];
-                out[index] = samples > 0 ? (sum[right] - sum[left]) / samples : src[index];
-            }
         }
-        return out;
+        curL = nextL;
+        curA = nextA;
+        curB = nextB;
     }
-    const sum = new Float64Array(height + 1);
-    const count = new Float64Array(height + 1);
-    for (let x = 0; x < width; x++) {
-        sum[0] = 0;
-        count[0] = 0;
-        for (let y = 0; y < height; y++) {
-            const index = y * width + x;
-            sum[y + 1] = sum[y] + (mask[index] ? src[index] : 0);
-            count[y + 1] = count[y] + (mask[index] ? 1 : 0);
-        }
-        for (let y = 0; y < height; y++) {
-            const index = y * width + x;
-            if (!mask[index]) continue;
-            const top = Math.max(0, y - radius);
-            const bottom = Math.min(height, y + radius + 1);
-            const samples = count[bottom] - count[top];
-            out[index] = samples > 0 ? (sum[bottom] - sum[top]) / samples : src[index];
-        }
-    }
-    return out;
+    return [curL, curA, curB];
 }
 
-export function blackHatInk(data, width, height) {
+function hueDelta(a0, b0, a1, b1) {
+    const first = Math.atan2(b0, a0);
+    const second = Math.atan2(b1, a1);
+    let delta = Math.abs(first - second) * (180 / Math.PI);
+    if (delta > 180) delta = 360 - delta;
+    return delta;
+}
+
+export function flatRegionLines(data, width, height) {
     const count = width * height;
-    const lum = new Float32Array(count);
     const opaque = new Uint8Array(count);
+    const L = new Float32Array(count);
+    const A = new Float32Array(count);
+    const B = new Float32Array(count);
     for (let i = 0; i < count; i++) {
         const offset = i * 4;
         if (data[offset + 3] < ALPHA_FG) continue;
         opaque[i] = 1;
-        lum[i] = data[offset] * 0.299 + data[offset + 1] * 0.587 + data[offset + 2] * 0.114;
+        const lab = rgbToLab(data[offset], data[offset + 1], data[offset + 2]);
+        L[i] = lab[0];
+        A[i] = lab[1];
+        B[i] = lab[2];
     }
-    const radius = Math.max(4, Math.round(height / 80));
-    const blurred = blurOpaque(
-        blurOpaque(lum, opaque, width, height, radius, true),
-        opaque,
-        width,
-        height,
-        radius,
-        false
-    );
-    const ink = new Uint8Array(count);
-    for (let i = 0; i < count; i++) {
-        if (opaque[i] && blurred[i] - lum[i] > INK_THRESHOLD) ink[i] = 1;
+    const [flatL, flatA, flatB] = flattenLab(L, A, B, opaque, width, height);
+    const lines = new Uint8Array(count);
+    const differs = (index, neighbor) => {
+        const dL = Math.abs(flatL[index] - flatL[neighbor]);
+        const c0 = Math.hypot(flatA[index], flatB[index]);
+        const c1 = Math.hypot(flatA[neighbor], flatB[neighbor]);
+        const hueEdge =
+            c0 >= MIN_CHROMA &&
+            c1 >= MIN_CHROMA &&
+            hueDelta(flatA[index], flatB[index], flatA[neighbor], flatB[neighbor]) >= HUE_EDGE;
+        return hueEdge || Math.abs(c0 - c1) >= CHROMA_EDGE || dL >= LIGHT_EDGE;
+    };
+    const mark = (index, neighbor) => {
+        if (opaque[index] !== opaque[neighbor]) {
+            lines[opaque[index] ? index : neighbor] = 1;
+            return;
+        }
+        if (opaque[index] && differs(index, neighbor)) lines[index] = 1;
+    };
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const index = y * width + x;
+            if (x + 1 < width) mark(index, index + 1);
+            if (y + 1 < height) mark(index, index + width);
+        }
     }
-    return ink;
+    return lines;
 }
