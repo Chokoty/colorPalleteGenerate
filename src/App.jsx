@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, Component } from "react";
+import { useState, useRef, useEffect, useCallback, Component } from "react";
 import Scene from "./Scene";
 import {
     DELTA_E_STOP,
@@ -7,6 +7,8 @@ import {
     recolorPixel,
     rgbToLab,
 } from "./imagePalette";
+import { contourMask, dilate, gradientEdges } from "./imageOutline";
+import { extractLineArt } from "./lineartModel";
 
 // Main-branch extraction: the user picks k, and centers are k-means means
 // of sampled RGB+XY points. Recolor fills each pixel with its center.
@@ -263,6 +265,11 @@ function opaqueSharePercents(data, centers) {
     return counts.map((n) => (100 * n) / opaque);
 }
 
+// Tiny shares still take a visible slice. The printed percent stays exact.
+function shareWeight(share) {
+    return Math.max(share, 2);
+}
+
 function paintedChannels(data, index, center, paintMode) {
     const offset = index * 4;
     if (paintMode === "auto") {
@@ -331,12 +338,21 @@ function App() {
     const [opaqueShares, setOpaqueShares] = useState([]);
     const [deltaEStop, setDeltaEStop] = useState(DELTA_E_STOP);
     const [showConvexHull, setShowConvexHull] = useState(true);
+    const [showContour, setShowContour] = useState(false);
+    const [showLines, setShowLines] = useState(false);
+    const [showInk, setShowInk] = useState(false);
+    const [inkNote, setInkNote] = useState("");
     const [loadError, setLoadError] = useState(null);
     const [uploadId, setUploadId] = useState(0);
     const fileInputRef = useRef(null);
     const canvasRef = useRef(null);
     const debounceTimeoutRef = useRef(null);
     const imageRef = useRef(null);
+    const previewRef = useRef(null);
+    const sourceImgRef = useRef(null);
+    const outlineCanvasRef = useRef(null);
+    const inkRequestRef = useRef(0);
+    const inkCacheRef = useRef(null);
     const clusterIdsRef = useRef(null);
     const manualSamplesRef = useRef(null);
     const manualCountRef = useRef(6);
@@ -535,6 +551,8 @@ function App() {
                         height: fitted.height,
                     };
                     imageRef.current = stored;
+                    previewRef.current = stored;
+                    inkCacheRef.current = null;
                     setImageData(canvas.toDataURL());
                     setUploadId((id) => id + 1);
                     setLoadError(null);
@@ -645,11 +663,151 @@ function App() {
         updateCanvasAndLayers(clusters, "auto");
     };
 
+    const addColorFromImage = (event) => {
+        const stored = imageRef.current;
+        const img = sourceImgRef.current;
+        const ids = clusterIdsRef.current;
+        if (!stored || !img || !ids || clusters.length === 0) return;
+        const bounds = img.getBoundingClientRect();
+        if (bounds.width === 0 || bounds.height === 0) return;
+        const relX = (event.clientX - bounds.left) / bounds.width;
+        const relY = (event.clientY - bounds.top) / bounds.height;
+        if (relX < 0 || relY < 0 || relX > 1 || relY > 1) return;
+        const x = Math.min(stored.width - 1, Math.max(0, Math.floor(relX * stored.width)));
+        const y = Math.min(stored.height - 1, Math.max(0, Math.floor(relY * stored.height)));
+        const offset = (y * stored.width + x) * 4;
+        if (stored.data[offset + 3] < 128) return;
+        const rgb = [
+            stored.data[offset] / 255,
+            stored.data[offset + 1] / 255,
+            stored.data[offset + 2] / 255,
+        ];
+        const hex = rgbToHex(rgb);
+        if (clusters.some((center) => rgbToHex(center.rgb) === hex)) return;
+        const next = [
+            ...clusters,
+            { rgb, xy: [x / Math.max(1, stored.width), y / Math.max(1, stored.height)] },
+        ];
+        if (modeRef.current === "manual") {
+            assignRgbIds(stored.data, stored.width, stored.height, next, colorWeight, spatialWeight, ids);
+        } else {
+            assignLabIds(
+                stored.data,
+                stored.width,
+                stored.height,
+                next,
+                colorWeight,
+                spatialWeight,
+                ids,
+                false
+            );
+        }
+        setClusters(next);
+        setOpaqueShares(opaqueSharePercents(stored.data, next));
+        updateCanvasAndLayers(next, modeRef.current);
+    };
+
     const copyToClipboard = (hex) => {
         navigator.clipboard.writeText(hex).then(() => {
             alert("HEX 코드가 클립보드에 복사되었습니다!");
         });
     };
+
+    const paintSourceOverlay = useCallback(() => {
+        const preview = previewRef.current;
+        const canvas = outlineCanvasRef.current;
+        const image = sourceImgRef.current;
+        if (!preview || !canvas || !image) return;
+        const width = image.clientWidth;
+        const height = image.clientHeight;
+        if (!width || !height) return;
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.clearRect(0, 0, width, height);
+        if (!showContour && !showLines && !showInk) {
+            inkRequestRef.current += 1;
+            setInkNote("");
+            return;
+        }
+
+        const source = document.createElement("canvas");
+        source.width = preview.width;
+        source.height = preview.height;
+        source.getContext("2d").putImageData(
+            new ImageData(new Uint8ClampedArray(preview.data), preview.width, preview.height),
+            0,
+            0
+        );
+        const view = document.createElement("canvas");
+        view.width = width;
+        view.height = height;
+        const viewCtx = view.getContext("2d");
+        viewCtx.drawImage(source, 0, 0, width, height);
+        const scaled = viewCtx.getImageData(0, 0, width, height);
+        const paint = (ink) => {
+            const frame = ctx.createImageData(width, height);
+            if (ink) {
+                const plate = document.createElement("canvas");
+                plate.width = ink.width;
+                plate.height = ink.height;
+                plate.getContext("2d").putImageData(new ImageData(ink.rgba, ink.width, ink.height), 0, 0);
+                ctx.drawImage(plate, 0, 0, width, height);
+                const drawn = ctx.getImageData(0, 0, width, height);
+                frame.data.set(drawn.data);
+            }
+            const stamp = (mask, color, alpha) => {
+                for (let i = 0; i < mask.length; i++) {
+                    if (!mask[i]) continue;
+                    const offset = i * 4;
+                    frame.data[offset] = color[0];
+                    frame.data[offset + 1] = color[1];
+                    frame.data[offset + 2] = color[2];
+                    frame.data[offset + 3] = alpha;
+                }
+            };
+            if (showLines) stamp(gradientEdges(scaled.data, width, height), [25, 25, 25], 230);
+            if (showContour) {
+                stamp(dilate(contourMask(scaled.data, width, height), width, height, 1), [12, 12, 12], 230);
+            }
+            ctx.putImageData(frame, 0, 0);
+        };
+
+        if (!showInk) {
+            inkRequestRef.current += 1;
+            setInkNote("");
+            paint(null);
+            return;
+        }
+
+        const cached = inkCacheRef.current;
+        if (cached && cached.source === preview.data) {
+            setInkNote("");
+            paint(cached.art);
+            return;
+        }
+
+        const request = ++inkRequestRef.current;
+        setInkNote("선화를 추출하는 중");
+        paint(null);
+        extractLineArt(preview.data, preview.width, preview.height)
+            .then((art) => {
+                if (request !== inkRequestRef.current) return;
+                inkCacheRef.current = { source: preview.data, art };
+                setInkNote("");
+                paint(art);
+            })
+            .catch((error) => {
+                console.error(error);
+                if (request !== inkRequestRef.current) return;
+                setInkNote("선화를 추출하지 못했습니다");
+            });
+    }, [showContour, showLines, showInk]);
+
+    useEffect(() => {
+        paintSourceOverlay();
+    }, [paintSourceOverlay, imageData]);
 
     useEffect(() => {
         if (!isUpdating && clusters.length > 0 && clusterIdsRef.current && canvasRef.current) {
@@ -718,6 +876,7 @@ function App() {
             </div>
             <PreviewBoundary resetKey={uploadId}>
             <div
+                className="result-layout"
                 style={{
                     display: "flex",
                     flexWrap: "wrap",
@@ -729,6 +888,7 @@ function App() {
                 }}
             >
                 <div
+                    className="source-and-palette"
                     style={{
                         display: "flex",
                         flexWrap: "wrap",
@@ -737,12 +897,47 @@ function App() {
                     }}
                 >
                     {imageData && (
-                        <div style={{ textAlign: "center" }}>
+                        <div className="source-column" style={{ textAlign: "center" }}>
                             <h2>원본 이미지</h2>
+                            <div style={{ display: "flex", gap: "16px", justifyContent: "center", margin: "8px 0 10px" }}>
+                                <label>
+                                    <input
+                                        type="checkbox"
+                                        checked={showContour}
+                                        onChange={(e) => setShowContour(e.target.checked)}
+                                    />
+                                    {" 윤곽선"}
+                                </label>
+                                <label>
+                                    <input
+                                        type="checkbox"
+                                        checked={showLines}
+                                        onChange={(e) => setShowLines(e.target.checked)}
+                                    />
+                                    {" 선 필터"}
+                                </label>
+                                <label>
+                                    <input
+                                        type="checkbox"
+                                        checked={showInk}
+                                        onChange={(e) => setShowInk(e.target.checked)}
+                                    />
+                                    {" 선화 추출"}
+                                </label>
+                                {inkNote && (
+                                    <span style={{ color: "#505050", fontSize: "14px" }}>{inkNote}</span>
+                                )}
+                            </div>
+                            <p style={{ margin: "0 0 8px", color: "#505050", fontSize: "14px" }}>
+                                원본을 클릭하면 그 색이 팔레트에 더해집니다.
+                            </p>
                             <div
+                                className="source-frame"
                                 style={{
                                     display: "inline-block",
+                                    position: "relative",
                                     lineHeight: 0,
+                                    maxWidth: "100%",
                                     backgroundColor: "#f5f5f5",
                                     backgroundImage:
                                         "linear-gradient(45deg, #d2d2d2 25%, transparent 25%), linear-gradient(-45deg, #d2d2d2 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #d2d2d2 75%), linear-gradient(-45deg, transparent 75%, #d2d2d2 75%)",
@@ -751,15 +946,28 @@ function App() {
                                 }}
                             >
                                 <img
+                                    ref={sourceImgRef}
                                     src={imageData}
                                     alt="원본"
+                                    onLoad={paintSourceOverlay}
+                                    onClick={addColorFromImage}
                                     style={{ maxHeight: "640px", maxWidth: "100%", height: "auto" }}
+                                />
+                                <canvas
+                                    ref={outlineCanvasRef}
+                                    style={{
+                                        position: "absolute",
+                                        inset: 0,
+                                        width: "100%",
+                                        height: "100%",
+                                        pointerEvents: "none",
+                                    }}
                                 />
                             </div>
                         </div>
                     )}
                     {clusters.length > 0 && (
-                        <div style={{ textAlign: "left", color: "#141414", paddingTop: "8px" }}>
+                        <div className="palette-panel">
                             <div style={{ fontSize: "22px", lineHeight: 1.2 }}>
                                 {clusters.length} swatches
                             </div>
@@ -768,58 +976,37 @@ function App() {
                                     stop ΔE {Math.round(deltaEStop)}
                                 </div>
                             )}
-                            <div
-                                style={{
-                                    marginTop: "18px",
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: "14px",
-                                }}
-                            >
+                            <div className="palette-share-bar" aria-hidden="true">
+                                {clusters.map((c, i) => (
+                                    <span
+                                        key={`${mode}-share-${i}`}
+                                        style={{
+                                            flex: `${shareWeight(opaqueShares[i] ?? 0)} 1 0`,
+                                            background: rgbToHex(c.rgb),
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                            <div className="palette-rows">
                                 {clusters.map((c, i) => {
                                     if (!c?.rgb) return null;
                                     const hex = rgbToHex(c.rgb);
                                     const share = opaqueShares[i] ?? 0;
                                     return (
-                                        <div
-                                            key={`${mode}-${i}`}
-                                            style={{
-                                                display: "flex",
-                                                alignItems: "flex-start",
-                                                gap: "14px",
-                                            }}
-                                        >
+                                        <div key={`${mode}-${i}`} className="palette-row">
                                             <input
                                                 className="palette-swatch"
                                                 type="color"
                                                 value={hex}
                                                 aria-label={hex}
                                                 onChange={(e) => handleColorChange(i, e)}
+                                                style={{ width: `max(${share}%, 36px)` }}
                                             />
-                                            <div style={{ paddingTop: "6px" }}>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => copyToClipboard(hex)}
-                                                    style={{
-                                                        background: "none",
-                                                        border: "none",
-                                                        padding: 0,
-                                                        font: "18px Arial, sans-serif",
-                                                        color: "#141414",
-                                                        cursor: "pointer",
-                                                    }}
-                                                >
+                                            <div className="palette-meta">
+                                                <button type="button" onClick={() => copyToClipboard(hex)}>
                                                     {hex}
                                                 </button>
-                                                <div
-                                                    style={{
-                                                        marginTop: "6px",
-                                                        fontSize: "15px",
-                                                        color: "#464646",
-                                                    }}
-                                                >
-                                                    {share.toFixed(1)}% opaque
-                                                </div>
+                                                <div>{share.toFixed(1)}% opaque</div>
                                             </div>
                                         </div>
                                     );
@@ -830,7 +1017,7 @@ function App() {
                     )}
                 </div>
                 {recoloredImage && (
-                    <div style={{ textAlign: "center" }}>
+                    <div className="recolor-column" style={{ textAlign: "center" }}>
                         <h2>재색상화된 이미지</h2>
                         <img
                             src={recoloredImage}

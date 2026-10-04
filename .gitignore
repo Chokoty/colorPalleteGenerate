@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 .vite
+
+# Copied from onnxruntime-web when the dev server or production build starts.
+public/ort/
