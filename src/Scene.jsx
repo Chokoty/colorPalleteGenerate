@@ -207,11 +207,14 @@ function SceneContent({ points, clusters, enableDamping, showConvexHull }) {
         scene.add(edgesRef.current);
 
         // 샘플 점 렌더링 (좌표 스케일링, 매번 업데이트)
-        if (points.length > 0) {
-            const positions = new Float32Array(points.length * 3);
-            const colors = new Float32Array(points.length * 3);
+        // The cloud is capped so a large sample cannot allocate a buffer the
+        // tab cannot keep, which would take the whole page down with it.
+        const cloud = points.length > 8000 ? points.slice(0, 8000) : points;
+        if (cloud.length > 0) {
+            const positions = new Float32Array(cloud.length * 3);
+            const colors = new Float32Array(cloud.length * 3);
 
-            points.forEach((p, idx) => {
+            cloud.forEach((p, idx) => {
                 positions[idx * 3] = p[0] * 255;
                 positions[idx * 3 + 1] = p[1] * 255;
                 positions[idx * 3 + 2] = p[2] * 255;
@@ -248,21 +251,26 @@ function SceneContent({ points, clusters, enableDamping, showConvexHull }) {
             console.warn("No points data available");
         }
 
-        // Convex Hull 렌더링
-        if (points && points.length > 3 && showConvexHull) {
-            const hullPoints = points.slice(0, 1000);
-            const rgbPoints = hullPoints.map(
-                (p) => new THREE.Vector3(p[0] * 255, p[1] * 255, p[2] * 255)
-            );
-            const geometry = new ConvexGeometry(rgbPoints);
-            const hullMaterial = new THREE.MeshBasicMaterial({
-                color: 0xffffff,
-                wireframe: true,
-                transparent: true,
-                opacity: 0.5,
-            });
-            const hullMesh = new THREE.Mesh(geometry, hullMaterial);
-            scene.add(hullMesh);
+        // Coplanar samples make ConvexGeometry throw. Keep that inside the
+        // scene so the rest of the page stays up.
+        if (cloud.length > 3 && showConvexHull) {
+            try {
+                const hullPoints = cloud.slice(0, 1000);
+                const rgbPoints = hullPoints.map(
+                    (p) => new THREE.Vector3(p[0] * 255, p[1] * 255, p[2] * 255)
+                );
+                const geometry = new ConvexGeometry(rgbPoints);
+                const hullMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xffffff,
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.5,
+                });
+                const hullMesh = new THREE.Mesh(geometry, hullMaterial);
+                scene.add(hullMesh);
+            } catch (error) {
+                console.error(error);
+            }
         }
 
         // 축 도우미 및 값 표시 (한 번만 실행)
