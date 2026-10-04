@@ -123,7 +123,11 @@ function buildHistogramFromPixels(pixelCount, readPixel) {
         const b = pixel[2];
         opaque++;
         const key = ((r & 255) << 16) | ((g & 255) << 8) | (b & 255);
-        if (!uniqueMap.has(key)) uniqueMap.set(key, [r & 255, g & 255, b & 255]);
+        // Bins decide the palette. This list is only the 3D preview, so it
+        // stops once it is large enough to draw and small enough to keep.
+        if (uniqueMap.size < 20000 && !uniqueMap.has(key)) {
+            uniqueMap.set(key, [r & 255, g & 255, b & 255]);
+        }
         const index =
             (((r >> BIN_SHIFT) * BIN_EDGE + (g >> BIN_SHIFT)) * BIN_EDGE) +
             (b >> BIN_SHIFT);
