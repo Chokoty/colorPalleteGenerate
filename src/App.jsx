@@ -7,7 +7,8 @@ import {
     recolorPixel,
     rgbToLab,
 } from "./imagePalette";
-import { contourMask, dilate, flatRegionLines, gradientEdges } from "./imageOutline";
+import { contourMask, dilate, gradientEdges } from "./imageOutline";
+import { extractLineArt } from "./lineartModel";
 
 // Main-branch extraction: the user picks k, and centers are k-means means
 // of sampled RGB+XY points. Recolor fills each pixel with its center.
@@ -250,6 +251,7 @@ function App() {
     const [showContour, setShowContour] = useState(false);
     const [showLines, setShowLines] = useState(false);
     const [showInk, setShowInk] = useState(false);
+    const [inkNote, setInkNote] = useState("");
     const fileInputRef = useRef(null);
     const canvasRef = useRef(null);
     const debounceTimeoutRef = useRef(null);
@@ -257,6 +259,8 @@ function App() {
     const previewRef = useRef(null);
     const sourceImgRef = useRef(null);
     const outlineCanvasRef = useRef(null);
+    const inkRequestRef = useRef(0);
+    const inkCacheRef = useRef(null);
     const manualSamplesRef = useRef(null);
     const manualCountRef = useRef(6);
     const modeRef = useRef("manual");
@@ -541,8 +545,13 @@ function App() {
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext("2d");
+        if (!ctx) return;
         ctx.clearRect(0, 0, width, height);
-        if (!showContour && !showLines && !showInk) return;
+        if (!showContour && !showLines && !showInk) {
+            inkRequestRef.current += 1;
+            setInkNote("");
+            return;
+        }
 
         const source = document.createElement("canvas");
         source.width = preview.width;
@@ -558,26 +567,63 @@ function App() {
         const viewCtx = view.getContext("2d");
         viewCtx.drawImage(source, 0, 0, width, height);
         const scaled = viewCtx.getImageData(0, 0, width, height);
-        const frame = ctx.createImageData(width, height);
-        const stamp = (mask, color, alpha) => {
-            for (let i = 0; i < mask.length; i++) {
-                if (!mask[i]) continue;
-                const offset = i * 4;
-                frame.data[offset] = color[0];
-                frame.data[offset + 1] = color[1];
-                frame.data[offset + 2] = color[2];
-                frame.data[offset + 3] = alpha;
+        const paint = (ink) => {
+            const frame = ctx.createImageData(width, height);
+            if (ink) {
+                const plate = document.createElement("canvas");
+                plate.width = ink.width;
+                plate.height = ink.height;
+                plate.getContext("2d").putImageData(new ImageData(ink.rgba, ink.width, ink.height), 0, 0);
+                ctx.drawImage(plate, 0, 0, width, height);
+                const drawn = ctx.getImageData(0, 0, width, height);
+                frame.data.set(drawn.data);
             }
+            const stamp = (mask, color, alpha) => {
+                for (let i = 0; i < mask.length; i++) {
+                    if (!mask[i]) continue;
+                    const offset = i * 4;
+                    frame.data[offset] = color[0];
+                    frame.data[offset + 1] = color[1];
+                    frame.data[offset + 2] = color[2];
+                    frame.data[offset + 3] = alpha;
+                }
+            };
+            if (showLines) stamp(gradientEdges(scaled.data, width, height), [25, 25, 25], 230);
+            if (showContour) {
+                stamp(dilate(contourMask(scaled.data, width, height), width, height, 1), [12, 12, 12], 230);
+            }
+            ctx.putImageData(frame, 0, 0);
         };
-        if (showInk) {
-            frame.data.fill(255);
-            stamp(flatRegionLines(scaled.data, width, height), [0, 0, 0], 255);
+
+        if (!showInk) {
+            inkRequestRef.current += 1;
+            setInkNote("");
+            paint(null);
+            return;
         }
-        if (showLines) stamp(gradientEdges(scaled.data, width, height), [25, 25, 25], 230);
-        if (showContour) {
-            stamp(dilate(contourMask(scaled.data, width, height), width, height, 1), [12, 12, 12], 230);
+
+        const cached = inkCacheRef.current;
+        if (cached && cached.source === preview.data) {
+            setInkNote("");
+            paint(cached.art);
+            return;
         }
-        ctx.putImageData(frame, 0, 0);
+
+        const request = ++inkRequestRef.current;
+        setInkNote("선화를 추출하는 중");
+        paint(null);
+        extractLineArt(preview.data, preview.width, preview.height)
+            .then((art) => {
+                if (request !== inkRequestRef.current) return;
+                inkCacheRef.current = { source: preview.data, art };
+                setInkNote("");
+                paint(art);
+            })
+            .catch((error) => {
+                console.error(error);
+                if (request !== inkRequestRef.current) return;
+                setInkNote("선화를 추출하지 못했습니다");
+            });
     }, [showContour, showLines, showInk]);
 
     useEffect(() => {
@@ -706,6 +752,9 @@ function App() {
                                     />
                                     {" 선화 추출"}
                                 </label>
+                                {inkNote && (
+                                    <span style={{ color: "#505050", fontSize: "14px" }}>{inkNote}</span>
+                                )}
                             </div>
                             <div
                                 style={{
