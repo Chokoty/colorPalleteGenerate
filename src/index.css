@@ -78,16 +78,99 @@ body {
     flex-direction: column;
 }
 
+.palette-panel {
+    width: min(100%, 420px);
+    max-width: 100%;
+    box-sizing: border-box;
+    color: #141414;
+    padding-top: 8px;
+}
+
+.palette-share-bar {
+    display: flex;
+    width: 100%;
+    height: 22px;
+    margin-top: 14px;
+    border: 1px solid #282828;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.palette-share-bar > span {
+    display: block;
+    height: 100%;
+    min-width: 4px;
+}
+
+.palette-rows {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.palette-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+}
+
+.palette-meta {
+    min-width: 0;
+    color: #141414;
+}
+
+.palette-meta button {
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    font: 16px Arial, sans-serif;
+    color: #141414;
+    cursor: pointer;
+}
+
+.palette-meta div {
+    margin-top: 4px;
+    font-size: 15px;
+    color: #141414;
+}
+
 .palette-swatch {
     -webkit-appearance: none;
     appearance: none;
-    width: 64px;
-    height: 64px;
+    height: 44px;
+    min-width: 36px;
+    max-width: calc(100% - 8.5rem);
     padding: 0;
     border: 1px solid #282828;
     background: none;
     cursor: pointer;
-    flex: 0 0 64px;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+}
+
+.source-frame img {
+    cursor: crosshair;
+}
+
+@media (max-width: 720px) {
+    .result-layout,
+    .source-and-palette {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .palette-panel,
+    .source-column,
+    .recolor-column {
+        width: 100%;
+    }
+
+    h1 {
+        font-size: 1.7rem;
+    }
 }
 
 .palette-swatch::-webkit-color-swatch-wrapper {

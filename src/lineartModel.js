@@ -144,7 +144,73 @@ function inkImage(output, width, height) {
         rgba[offset + 2] = paper;
         rgba[offset + 3] = 255;
     }
-    return { width, height, rgba };
+    return crispLineArt({ width, height, rgba });
+}
+
+// Faint gray that does not touch a stroke is paper. Strokes are pulled toward
+// black, a one-pixel gap between strokes is filled, and the gray fringe of a
+// stroke is darkened so the line reads a little thicker.
+const PAPER = 208;
+const CORE = 176;
+
+export function crispLineArt(image) {
+    const { width, height, rgba } = image;
+    const count = width * height;
+    const src = new Uint8Array(count);
+    for (let i = 0; i < count; i++) src[i] = rgba[i * 4];
+
+    const dropped = new Uint8Array(count);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const index = y * width + x;
+            const value = src[index];
+            if (value < PAPER) {
+                dropped[index] = value;
+                continue;
+            }
+            let touchesStroke = false;
+            for (let dy = -1; dy <= 1 && !touchesStroke; dy++) {
+                const ny = y + dy;
+                if (ny < 0 || ny >= height) continue;
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const nx = x + dx;
+                    if (nx < 0 || nx >= width) continue;
+                    if (src[ny * width + nx] <= CORE) {
+                        touchesStroke = true;
+                        break;
+                    }
+                }
+            }
+            dropped[index] = touchesStroke ? value : 255;
+        }
+    }
+
+    const out = new Uint8ClampedArray(rgba.length);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const index = y * width + x;
+            let value = dropped[index];
+            let darkNeighbors = 0;
+            if (x > 0 && dropped[index - 1] <= CORE) darkNeighbors++;
+            if (x + 1 < width && dropped[index + 1] <= CORE) darkNeighbors++;
+            if (y > 0 && dropped[index - width] <= CORE) darkNeighbors++;
+            if (y + 1 < height && dropped[index + width] <= CORE) darkNeighbors++;
+            if (value <= CORE) {
+                value = Math.round((value * value) / 255);
+            } else if (darkNeighbors >= 2 || (darkNeighbors >= 1 && value < 255)) {
+                value = 42;
+            } else {
+                value = 255;
+            }
+            const offset = index * 4;
+            out[offset] = value;
+            out[offset + 1] = value;
+            out[offset + 2] = value;
+            out[offset + 3] = 255;
+        }
+    }
+    return { width, height, rgba: out };
 }
 
 async function runOnce(ort, session, data, width, height, longSide) {

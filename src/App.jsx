@@ -217,6 +217,11 @@ function opaqueSharePercents(pixelList, centers) {
     return counts.map((n) => (100 * n) / opaque);
 }
 
+// Tiny shares still take a visible slice. The printed percent stays exact.
+function shareWeight(share) {
+    return Math.max(share, 2);
+}
+
 function paintedChannels(pixel, center, paintMode) {
     if (paintMode === "auto") {
         const color = recolorPixel(
@@ -528,6 +533,48 @@ function App() {
         );
     };
 
+    const addColorFromImage = (event) => {
+        const stored = imageRef.current;
+        const img = sourceImgRef.current;
+        if (!stored || !img || pixels.length === 0 || clusters.length === 0) return;
+        const bounds = img.getBoundingClientRect();
+        if (bounds.width === 0 || bounds.height === 0) return;
+        const relX = (event.clientX - bounds.left) / bounds.width;
+        const relY = (event.clientY - bounds.top) / bounds.height;
+        if (relX < 0 || relY < 0 || relX > 1 || relY > 1) return;
+        const x = Math.min(stored.width - 1, Math.max(0, Math.floor(relX * stored.width)));
+        const y = Math.min(stored.height - 1, Math.max(0, Math.floor(relY * stored.height)));
+        const offset = (y * stored.width + x) * 4;
+        if (stored.data[offset + 3] < 128) return;
+        const rgb = [
+            stored.data[offset] / 255,
+            stored.data[offset + 1] / 255,
+            stored.data[offset + 2] / 255,
+        ];
+        const hex = rgbToHex(rgb);
+        if (clusters.some((center) => rgbToHex(center.rgb) === hex)) return;
+        const next = [
+            ...clusters,
+            { rgb, xy: [x / Math.max(1, stored.width), y / Math.max(1, stored.height)] },
+        ];
+        if (modeRef.current === "manual") {
+            for (const pixel of pixels) {
+                pixel.cluster = rgbAssignCluster(pixel, next, colorWeight, spatialWeight);
+            }
+        } else {
+            assignPalette(pixels, next, colorWeight, spatialWeight);
+        }
+        setClusters(next);
+        setOpaqueShares(opaqueSharePercents(pixels, next));
+        updateCanvasAndLayers(
+            pixels,
+            next,
+            stored.width,
+            stored.height,
+            modeRef.current
+        );
+    };
+
     const copyToClipboard = (hex) => {
         navigator.clipboard.writeText(hex).then(() => {
             alert("HEX 코드가 클립보드에 복사되었습니다!");
@@ -706,6 +753,7 @@ function App() {
                 />
             </div>
             <div
+                className="result-layout"
                 style={{
                     display: "flex",
                     flexWrap: "wrap",
@@ -717,6 +765,7 @@ function App() {
                 }}
             >
                 <div
+                    className="source-and-palette"
                     style={{
                         display: "flex",
                         flexWrap: "wrap",
@@ -725,7 +774,7 @@ function App() {
                     }}
                 >
                     {imageData && (
-                        <div style={{ textAlign: "center" }}>
+                        <div className="source-column" style={{ textAlign: "center" }}>
                             <h2>원본 이미지</h2>
                             <div style={{ display: "flex", gap: "16px", justifyContent: "center", margin: "8px 0 10px" }}>
                                 <label>
@@ -756,11 +805,16 @@ function App() {
                                     <span style={{ color: "#505050", fontSize: "14px" }}>{inkNote}</span>
                                 )}
                             </div>
+                            <p style={{ margin: "0 0 8px", color: "#505050", fontSize: "14px" }}>
+                                원본을 클릭하면 그 색이 팔레트에 더해집니다.
+                            </p>
                             <div
+                                className="source-frame"
                                 style={{
                                     display: "inline-block",
                                     position: "relative",
                                     lineHeight: 0,
+                                    maxWidth: "100%",
                                     backgroundColor: "#f5f5f5",
                                     backgroundImage:
                                         "linear-gradient(45deg, #d2d2d2 25%, transparent 25%), linear-gradient(-45deg, #d2d2d2 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #d2d2d2 75%), linear-gradient(-45deg, transparent 75%, #d2d2d2 75%)",
@@ -773,6 +827,7 @@ function App() {
                                     src={imageData}
                                     alt="원본"
                                     onLoad={paintSourceOverlay}
+                                    onClick={addColorFromImage}
                                     style={{ maxHeight: "640px", maxWidth: "100%", height: "auto" }}
                                 />
                                 <canvas
@@ -789,7 +844,7 @@ function App() {
                         </div>
                     )}
                     {clusters.length > 0 && (
-                        <div style={{ textAlign: "left", color: "#141414", paddingTop: "8px" }}>
+                        <div className="palette-panel">
                             <div style={{ fontSize: "22px", lineHeight: 1.2 }}>
                                 {clusters.length} swatches
                             </div>
@@ -798,57 +853,36 @@ function App() {
                                     stop ΔE {Math.round(deltaEStop)}
                                 </div>
                             )}
-                            <div
-                                style={{
-                                    marginTop: "18px",
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: "14px",
-                                }}
-                            >
+                            <div className="palette-share-bar" aria-hidden="true">
+                                {clusters.map((c, i) => (
+                                    <span
+                                        key={`${mode}-share-${i}`}
+                                        style={{
+                                            flex: `${shareWeight(opaqueShares[i] ?? 0)} 1 0`,
+                                            background: rgbToHex(c.rgb),
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                            <div className="palette-rows">
                                 {clusters.map((c, i) => {
                                     const hex = rgbToHex(c.rgb);
                                     const share = opaqueShares[i] ?? 0;
                                     return (
-                                        <div
-                                            key={`${mode}-${i}`}
-                                            style={{
-                                                display: "flex",
-                                                alignItems: "flex-start",
-                                                gap: "14px",
-                                            }}
-                                        >
+                                        <div key={`${mode}-${i}`} className="palette-row">
                                             <input
                                                 className="palette-swatch"
                                                 type="color"
                                                 value={hex}
                                                 aria-label={hex}
                                                 onChange={(e) => handleColorChange(i, e)}
+                                                style={{ width: `max(${share}%, 36px)` }}
                                             />
-                                            <div style={{ paddingTop: "6px" }}>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => copyToClipboard(hex)}
-                                                    style={{
-                                                        background: "none",
-                                                        border: "none",
-                                                        padding: 0,
-                                                        font: "18px Arial, sans-serif",
-                                                        color: "#141414",
-                                                        cursor: "pointer",
-                                                    }}
-                                                >
+                                            <div className="palette-meta">
+                                                <button type="button" onClick={() => copyToClipboard(hex)}>
                                                     {hex}
                                                 </button>
-                                                <div
-                                                    style={{
-                                                        marginTop: "6px",
-                                                        fontSize: "15px",
-                                                        color: "#464646",
-                                                    }}
-                                                >
-                                                    {share.toFixed(1)}% opaque
-                                                </div>
+                                                <div>{share.toFixed(1)}% opaque</div>
                                             </div>
                                         </div>
                                     );
@@ -859,7 +893,7 @@ function App() {
                     )}
                 </div>
                 {recoloredImage && (
-                    <div style={{ textAlign: "center" }}>
+                    <div className="recolor-column" style={{ textAlign: "center" }}>
                         <h2>재색상화된 이미지</h2>
                         <img
                             src={recoloredImage}
