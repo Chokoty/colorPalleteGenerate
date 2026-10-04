@@ -270,6 +270,67 @@ function shareWeight(share) {
     return Math.max(share, 2);
 }
 
+function downscaleImage(data, width, height, maxSide) {
+    const fitted = fitInside(width, height, maxSide);
+    const src = document.createElement("canvas");
+    src.width = width;
+    src.height = height;
+    src.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(data), width, height), 0, 0);
+    const dst = document.createElement("canvas");
+    dst.width = fitted.width;
+    dst.height = fitted.height;
+    const ctx = dst.getContext("2d");
+    ctx.drawImage(src, 0, 0, fitted.width, fitted.height);
+    const image = ctx.getImageData(0, 0, fitted.width, fitted.height);
+    return { data: image.data, width: fitted.width, height: fitted.height };
+}
+
+function strokeThumbnail(mask, width, height) {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    const frame = ctx.createImageData(width, height);
+    for (let i = 0; i < mask.length; i++) {
+        if (!mask[i]) continue;
+        const offset = i * 4;
+        frame.data[offset] = 24;
+        frame.data[offset + 1] = 24;
+        frame.data[offset + 2] = 24;
+        frame.data[offset + 3] = 255;
+    }
+    ctx.putImageData(frame, 0, 0);
+    return canvas.toDataURL();
+}
+
+function inkPlate(art) {
+    const canvas = document.createElement("canvas");
+    canvas.width = art.width;
+    canvas.height = art.height;
+    const ctx = canvas.getContext("2d");
+    const frame = ctx.createImageData(art.width, art.height);
+    for (let i = 0; i < art.width * art.height; i++) {
+        const value = art.rgba[i * 4];
+        const offset = i * 4;
+        frame.data[offset] = value;
+        frame.data[offset + 1] = value;
+        frame.data[offset + 2] = value;
+        frame.data[offset + 3] = value > 226 ? 0 : 255;
+    }
+    ctx.putImageData(frame, 0, 0);
+    return canvas;
+}
+
+function lineArtThumbnail(art) {
+    const plate = inkPlate(art);
+    const fitted = fitInside(art.width, art.height, 180);
+    const canvas = document.createElement("canvas");
+    canvas.width = fitted.width;
+    canvas.height = fitted.height;
+    canvas.getContext("2d").drawImage(plate, 0, 0, fitted.width, fitted.height);
+    return canvas.toDataURL();
+}
+
 function paintedChannels(data, index, center, paintMode) {
     const offset = index * 4;
     if (paintMode === "auto") {
@@ -328,7 +389,6 @@ function App() {
     const [imageData, setImageData] = useState(null);
     const [samplePoints, setSamplePoints] = useState([]);
     const [clusters, setClusters] = useState([]);
-    const [recoloredImage, setRecoloredImage] = useState(null);
     const [recolorTime, setRecolorTime] = useState(0);
     const [layerImages, setLayerImages] = useState([]);
     const [isUpdating, setIsUpdating] = useState(false);
@@ -338,10 +398,16 @@ function App() {
     const [opaqueShares, setOpaqueShares] = useState([]);
     const [deltaEStop, setDeltaEStop] = useState(DELTA_E_STOP);
     const [showConvexHull, setShowConvexHull] = useState(true);
-    const [showContour, setShowContour] = useState(false);
     const [showLines, setShowLines] = useState(false);
     const [showInk, setShowInk] = useState(false);
     const [inkNote, setInkNote] = useState("");
+    const [layersOpen, setLayersOpen] = useState(() => window.matchMedia("(min-width: 721px)").matches);
+    const [showOriginalLayer, setShowOriginalLayer] = useState(false);
+    const [showContourLayer, setShowContourLayer] = useState(false);
+    const [lineArtVisible, setLineArtVisible] = useState(true);
+    const [colorVisible, setColorVisible] = useState([]);
+    const [contourThumb, setContourThumb] = useState(null);
+    const [lineArtThumb, setLineArtThumb] = useState(null);
     const [loadError, setLoadError] = useState(null);
     const [uploadId, setUploadId] = useState(0);
     const fileInputRef = useRef(null);
@@ -349,10 +415,16 @@ function App() {
     const debounceTimeoutRef = useRef(null);
     const imageRef = useRef(null);
     const previewRef = useRef(null);
-    const sourceImgRef = useRef(null);
-    const outlineCanvasRef = useRef(null);
+    const previewCanvasRef = useRef(null);
     const inkRequestRef = useRef(0);
     const inkCacheRef = useRef(null);
+    const contourMaskRef = useRef(null);
+    const showOriginalRef = useRef(false);
+    const showContourRef = useRef(false);
+    const showLinesRef = useRef(false);
+    const lineArtVisibleRef = useRef(true);
+    const colorVisibleRef = useRef([]);
+    const clustersRef = useRef([]);
     const clusterIdsRef = useRef(null);
     const manualSamplesRef = useRef(null);
     const manualCountRef = useRef(6);
@@ -385,7 +457,6 @@ function App() {
         ctx.putImageData(frame, 0, 0);
         const timeTaken = (performance.now() - startTime).toFixed(2);
         setRecolorTime(timeTaken);
-        setRecoloredImage(canvas.toDataURL());
 
         // Manual mode fills each cluster with its mean. Automatic mode keeps
         // the pixel's lightness and takes hue from the swatch. Full RGBXY
@@ -421,6 +492,7 @@ function App() {
             layerUrls.push(thumb.toDataURL());
         }
         setLayerImages(layerUrls);
+        paintComposite();
         };
         paintBody();
         } catch (error) {
@@ -469,13 +541,14 @@ function App() {
             setClusters([]);
             setOpaqueShares([]);
             setLayerImages([]);
-            setRecoloredImage(null);
             return;
         }
         const ids = idsFor(stored);
         assignRgbIds(data, width, height, centers, nextColor, nextSpatial, ids);
         setClusters(centers);
         setClusterCount(count);
+        colorVisibleRef.current = centers.map(() => true);
+        setColorVisible(colorVisibleRef.current);
         setOpaqueShares(opaqueSharePercents(data, centers));
         console.log(
             "Manual k-means palette:",
@@ -500,7 +573,6 @@ function App() {
             setClusters([]);
             setOpaqueShares([]);
             setLayerImages([]);
-            setRecoloredImage(null);
             setDeltaEStop(extracted.deltaEStop);
             return;
         }
@@ -509,6 +581,8 @@ function App() {
         setSamplePoints(viewSamples(extracted.uniqueColors));
         setClusters(centers);
         setClusterCount(centers.length);
+        colorVisibleRef.current = centers.map(() => true);
+        setColorVisible(colorVisibleRef.current);
         setDeltaEStop(extracted.deltaEStop);
         setOpaqueShares(opaqueSharePercents(data, centers));
     };
@@ -553,6 +627,17 @@ function App() {
                     imageRef.current = stored;
                     previewRef.current = stored;
                     inkCacheRef.current = null;
+                    contourMaskRef.current = null;
+                    showOriginalRef.current = false;
+                    showContourRef.current = false;
+                    lineArtVisibleRef.current = true;
+                    colorVisibleRef.current = [];
+                    setShowOriginalLayer(false);
+                    setShowContourLayer(false);
+                    setLineArtVisible(true);
+                    setColorVisible([]);
+                    setContourThumb(null);
+                    setLineArtThumb(null);
                     setImageData(canvas.toDataURL());
                     setUploadId((id) => id + 1);
                     setLoadError(null);
@@ -568,7 +653,6 @@ function App() {
                     setClusters([]);
                     setSamplePoints([]);
                     setLayerImages([]);
-                    setRecoloredImage(null);
                     setLoadError("이미지를 처리하지 못했습니다.");
                 }
             };
@@ -665,7 +749,7 @@ function App() {
 
     const addColorFromImage = (event) => {
         const stored = imageRef.current;
-        const img = sourceImgRef.current;
+        const img = previewCanvasRef.current;
         const ids = clusterIdsRef.current;
         if (!stored || !img || !ids || clusters.length === 0) return;
         const bounds = img.getBoundingClientRect();
@@ -702,6 +786,11 @@ function App() {
                 false
             );
         }
+        const nextVisible = colorVisibleRef.current.slice(0, clusters.length);
+        while (nextVisible.length < clusters.length) nextVisible.push(true);
+        nextVisible.push(true);
+        colorVisibleRef.current = nextVisible;
+        setColorVisible(nextVisible);
         setClusters(next);
         setOpaqueShares(opaqueSharePercents(stored.data, next));
         updateCanvasAndLayers(next, modeRef.current);
@@ -713,101 +802,141 @@ function App() {
         });
     };
 
-    const paintSourceOverlay = useCallback(() => {
-        const preview = previewRef.current;
-        const canvas = outlineCanvasRef.current;
-        const image = sourceImgRef.current;
-        if (!preview || !canvas || !image) return;
-        const width = image.clientWidth;
-        const height = image.clientHeight;
-        if (!width || !height) return;
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        ctx.clearRect(0, 0, width, height);
-        if (!showContour && !showLines && !showInk) {
-            inkRequestRef.current += 1;
-            setInkNote("");
-            return;
-        }
+    showOriginalRef.current = showOriginalLayer;
+    showContourRef.current = showContourLayer;
+    showLinesRef.current = showLines;
+    lineArtVisibleRef.current = lineArtVisible;
+    colorVisibleRef.current = colorVisible;
+    clustersRef.current = clusters;
 
-        const source = document.createElement("canvas");
-        source.width = preview.width;
-        source.height = preview.height;
-        source.getContext("2d").putImageData(
-            new ImageData(new Uint8ClampedArray(preview.data), preview.width, preview.height),
-            0,
-            0
-        );
-        const view = document.createElement("canvas");
+    const paintComposite = () => {
+        const stored = imageRef.current;
+        const view = previewCanvasRef.current;
+        const ids = clusterIdsRef.current;
+        const centers = clustersRef.current;
+        if (!stored || !view || !ids || !centers || centers.length === 0) return;
+        const width = stored.width;
+        const height = stored.height;
+        const plate = canvasRef.current;
+        if (!plate) return;
+        plate.width = width;
+        plate.height = height;
+        const ctx = plate.getContext("2d");
+        if (!ctx) return;
+        const frame = ctx.createImageData(width, height);
+        const visibleColors = colorVisibleRef.current;
+        const showOriginal = showOriginalRef.current;
+        for (let p = 0; p < ids.length; p++) {
+            const offset = p * 4;
+            const cluster = ids[p];
+            const center = centers[cluster];
+            if (center && visibleColors[cluster] !== false) {
+                const color = paintedChannels(stored.data, p, center, modeRef.current);
+                frame.data[offset] = color[0];
+                frame.data[offset + 1] = color[1];
+                frame.data[offset + 2] = color[2];
+                frame.data[offset + 3] = 255;
+            } else if (showOriginal) {
+                frame.data[offset] = stored.data[offset];
+                frame.data[offset + 1] = stored.data[offset + 1];
+                frame.data[offset + 2] = stored.data[offset + 2];
+                frame.data[offset + 3] = stored.data[offset + 3];
+            }
+        }
+        if (showContourRef.current) {
+            if (!contourMaskRef.current || contourMaskRef.current.source !== stored.data) {
+                contourMaskRef.current = {
+                    source: stored.data,
+                    mask: dilate(contourMask(stored.data, width, height), width, height, 1),
+                };
+            }
+            const mask = contourMaskRef.current.mask;
+            for (let i = 0; i < mask.length; i++) {
+                if (!mask[i]) continue;
+                const offset = i * 4;
+                frame.data[offset] = 12;
+                frame.data[offset + 1] = 12;
+                frame.data[offset + 2] = 12;
+                frame.data[offset + 3] = 230;
+            }
+        }
+        if (showLinesRef.current) {
+            const edges = gradientEdges(stored.data, width, height);
+            for (let i = 0; i < edges.length; i++) {
+                if (!edges[i]) continue;
+                const offset = i * 4;
+                frame.data[offset] = 25;
+                frame.data[offset + 1] = 25;
+                frame.data[offset + 2] = 25;
+                frame.data[offset + 3] = 230;
+            }
+        }
+        ctx.putImageData(frame, 0, 0);
+        const art = inkCacheRef.current;
+        if (showInk && lineArtVisibleRef.current && art && art.source === stored.data) {
+            ctx.drawImage(inkPlate(art.art), 0, 0, width, height);
+        }
         view.width = width;
         view.height = height;
         const viewCtx = view.getContext("2d");
-        viewCtx.drawImage(source, 0, 0, width, height);
-        const scaled = viewCtx.getImageData(0, 0, width, height);
-        const paint = (ink) => {
-            const frame = ctx.createImageData(width, height);
-            if (ink) {
-                const plate = document.createElement("canvas");
-                plate.width = ink.width;
-                plate.height = ink.height;
-                plate.getContext("2d").putImageData(new ImageData(ink.rgba, ink.width, ink.height), 0, 0);
-                ctx.drawImage(plate, 0, 0, width, height);
-                const drawn = ctx.getImageData(0, 0, width, height);
-                frame.data.set(drawn.data);
-            }
-            const stamp = (mask, color, alpha) => {
-                for (let i = 0; i < mask.length; i++) {
-                    if (!mask[i]) continue;
-                    const offset = i * 4;
-                    frame.data[offset] = color[0];
-                    frame.data[offset + 1] = color[1];
-                    frame.data[offset + 2] = color[2];
-                    frame.data[offset + 3] = alpha;
-                }
-            };
-            if (showLines) stamp(gradientEdges(scaled.data, width, height), [25, 25, 25], 230);
-            if (showContour) {
-                stamp(dilate(contourMask(scaled.data, width, height), width, height, 1), [12, 12, 12], 230);
-            }
-            ctx.putImageData(frame, 0, 0);
-        };
+        if (!viewCtx) return;
+        viewCtx.clearRect(0, 0, width, height);
+        viewCtx.drawImage(plate, 0, 0);
+    };
 
+    const refreshLineArt = useCallback(() => {
+        const preview = previewRef.current;
+        if (!preview) return;
         if (!showInk) {
             inkRequestRef.current += 1;
             setInkNote("");
-            paint(null);
+            setLineArtThumb(null);
             return;
         }
-
         const cached = inkCacheRef.current;
         if (cached && cached.source === preview.data) {
             setInkNote("");
-            paint(cached.art);
+            setLineArtThumb(lineArtThumbnail(cached.art));
             return;
         }
-
         const request = ++inkRequestRef.current;
         setInkNote("선화를 추출하는 중");
-        paint(null);
         extractLineArt(preview.data, preview.width, preview.height)
             .then((art) => {
                 if (request !== inkRequestRef.current) return;
                 inkCacheRef.current = { source: preview.data, art };
+                lineArtVisibleRef.current = true;
+                setLineArtVisible(true);
+                setLineArtThumb(lineArtThumbnail(art));
                 setInkNote("");
-                paint(art);
             })
             .catch((error) => {
                 console.error(error);
                 if (request !== inkRequestRef.current) return;
                 setInkNote("선화를 추출하지 못했습니다");
             });
-    }, [showContour, showLines, showInk]);
+    }, [showInk]);
 
     useEffect(() => {
-        paintSourceOverlay();
-    }, [paintSourceOverlay, imageData]);
+        refreshLineArt();
+    }, [refreshLineArt, imageData]);
+
+    useEffect(() => {
+        const stored = imageRef.current;
+        if (!stored) return;
+        try {
+            const small = downscaleImage(stored.data, stored.width, stored.height, 180);
+            const mask = dilate(contourMask(small.data, small.width, small.height), small.width, small.height, 1);
+            setContourThumb(strokeThumbnail(mask, small.width, small.height));
+        } catch (error) {
+            console.error(error);
+            setContourThumb(null);
+        }
+    }, [imageData]);
+
+    useEffect(() => {
+        paintComposite();
+    }, [imageData, clusters, colorVisible, showOriginalLayer, showContourLayer, lineArtVisible, showLines, showInk, lineArtThumb, isUpdating]);
 
     useEffect(() => {
         if (!isUpdating && clusters.length > 0 && clusterIdsRef.current && canvasRef.current) {
@@ -875,39 +1004,19 @@ function App() {
                 />
             </div>
             <PreviewBoundary resetKey={uploadId}>
-            <div
-                className="result-layout"
-                style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    justifyContent: "center",
-                    alignItems: "flex-start",
-                    gap: "28px",
-                    margin: "20px 0",
-                    width: "100%",
-                }}
-            >
-                <div
-                    className="source-and-palette"
-                    style={{
-                        display: "flex",
-                        flexWrap: "wrap",
-                        alignItems: "flex-start",
-                        gap: "28px",
-                    }}
-                >
+            <div className="stage">
+                <div className="canvas-and-swatches">
                     {imageData && (
-                        <div className="source-column" style={{ textAlign: "center" }}>
-                            <h2>원본 이미지</h2>
-                            <div style={{ display: "flex", gap: "16px", justifyContent: "center", margin: "8px 0 10px" }}>
-                                <label>
-                                    <input
-                                        type="checkbox"
-                                        checked={showContour}
-                                        onChange={(e) => setShowContour(e.target.checked)}
-                                    />
-                                    {" 윤곽선"}
-                                </label>
+                        <div className="canvas-column">
+                            <div className="stage-toolbar">
+                                <button
+                                    type="button"
+                                    className="layer-toggle"
+                                    aria-pressed={layersOpen}
+                                    onClick={() => setLayersOpen((open) => !open)}
+                                >
+                                    {layersOpen ? "레이어 숨기기" : "레이어"}
+                                </button>
                                 <label>
                                     <input
                                         type="checkbox"
@@ -929,41 +1038,14 @@ function App() {
                                 )}
                             </div>
                             <p style={{ margin: "0 0 8px", color: "#505050", fontSize: "14px" }}>
-                                원본을 클릭하면 그 색이 팔레트에 더해집니다.
+                                미리보기를 클릭하면 그 색이 팔레트에 더해집니다.
                             </p>
-                            <div
-                                className="source-frame"
-                                style={{
-                                    display: "inline-block",
-                                    position: "relative",
-                                    lineHeight: 0,
-                                    maxWidth: "100%",
-                                    backgroundColor: "#f5f5f5",
-                                    backgroundImage:
-                                        "linear-gradient(45deg, #d2d2d2 25%, transparent 25%), linear-gradient(-45deg, #d2d2d2 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #d2d2d2 75%), linear-gradient(-45deg, transparent 75%, #d2d2d2 75%)",
-                                    backgroundSize: "16px 16px",
-                                    backgroundPosition: "0 0, 0 8px, 8px -8px, -8px 0",
-                                }}
-                            >
-                                <img
-                                    ref={sourceImgRef}
-                                    src={imageData}
-                                    alt="원본"
-                                    onLoad={paintSourceOverlay}
-                                    onClick={addColorFromImage}
-                                    style={{ maxHeight: "640px", maxWidth: "100%", height: "auto" }}
-                                />
-                                <canvas
-                                    ref={outlineCanvasRef}
-                                    style={{
-                                        position: "absolute",
-                                        inset: 0,
-                                        width: "100%",
-                                        height: "100%",
-                                        pointerEvents: "none",
-                                    }}
-                                />
-                            </div>
+                            <canvas
+                                ref={previewCanvasRef}
+                                className="stage-canvas"
+                                onClick={addColorFromImage}
+                                aria-label="미리보기"
+                            />
                         </div>
                     )}
                     {clusters.length > 0 && (
@@ -1016,15 +1098,76 @@ function App() {
                         </div>
                     )}
                 </div>
-                {recoloredImage && (
-                    <div className="recolor-column" style={{ textAlign: "center" }}>
-                        <h2>재색상화된 이미지</h2>
-                        <img
-                            src={recoloredImage}
-                            alt="재색상화"
-                            style={{ maxHeight: "640px", maxWidth: "100%", height: "auto" }}
-                        />
-                    </div>
+                {layersOpen && imageData && (
+                    <aside className="layer-dock" aria-label="레이어">
+                        <div className="layer-dock-title">레이어</div>
+                        {showInk && lineArtThumb && (
+                            <label className="layer-row" data-hidden={lineArtVisible ? "false" : "true"}>
+                                <img src={lineArtThumb} alt="" />
+                                <span className="layer-name">선화</span>
+                                <input
+                                    type="checkbox"
+                                    checked={lineArtVisible}
+                                    aria-label="선화 표시"
+                                    onChange={(e) => {
+                                        lineArtVisibleRef.current = e.target.checked;
+                                        setLineArtVisible(e.target.checked);
+                                    }}
+                                />
+                            </label>
+                        )}
+                        <label className="layer-row" data-hidden={showContourLayer ? "false" : "true"}>
+                            {contourThumb ? <img src={contourThumb} alt="" /> : <span className="layer-thumb" />}
+                            <span className="layer-name">윤곽선</span>
+                            <input
+                                type="checkbox"
+                                checked={showContourLayer}
+                                aria-label="윤곽선 표시"
+                                onChange={(e) => {
+                                    showContourRef.current = e.target.checked;
+                                    setShowContourLayer(e.target.checked);
+                                }}
+                            />
+                        </label>
+                        {clusters.map((c, i) => {
+                            if (!c?.rgb) return null;
+                            const hex = rgbToHex(c.rgb);
+                            const shown = colorVisible[i] !== false;
+                            return (
+                                <label key={`${mode}-layer-${i}`} className="layer-row" data-hidden={shown ? "false" : "true"}>
+                                    {layerImages[i] ? <img src={layerImages[i]} alt="" /> : <span className="layer-thumb" />}
+                                    <span className="layer-name">{hex}</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={shown}
+                                        aria-label={`${hex} 표시`}
+                                        onChange={(e) => {
+                                            const checked = e.target.checked;
+                                            setColorVisible((prev) => {
+                                                const next = clusters.map((_, index) => prev[index] !== false);
+                                                next[i] = checked;
+                                                colorVisibleRef.current = next;
+                                                return next;
+                                            });
+                                        }}
+                                    />
+                                </label>
+                            );
+                        })}
+                        <label className="layer-row" data-hidden={showOriginalLayer ? "false" : "true"}>
+                            <img src={imageData} alt="" />
+                            <span className="layer-name">원본</span>
+                            <input
+                                type="checkbox"
+                                checked={showOriginalLayer}
+                                aria-label="원본 표시"
+                                onChange={(e) => {
+                                    showOriginalRef.current = e.target.checked;
+                                    setShowOriginalLayer(e.target.checked);
+                                }}
+                            />
+                        </label>
+                    </aside>
                 )}
             </div>
             {samplePoints.length > 0 && (
@@ -1064,29 +1207,6 @@ function App() {
                     step="1"
                     min="1"
                 />
-            </div>
-            <div
-                style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    justifyContent: "center",
-                    gap: "20px",
-                    width: "100%",
-                    maxWidth: "1200px",
-                    margin: "20px auto",
-                    backgroundColor: "#333333",
-                }}
-            >
-                {layerImages.map((layer, i) => (
-                    <div key={`${mode}-layer-${i}`} style={{ margin: "10px", textAlign: "center" }}>
-                        <h2>레이어 {i + 1}</h2>
-                        <img
-                            src={layer}
-                            alt={`레이어 ${i + 1}`}
-                            style={{ maxWidth: "200px" }}
-                        />
-                    </div>
-                ))}
             </div>
             </PreviewBoundary>
         </div>
