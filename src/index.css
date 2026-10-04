@@ -140,14 +140,13 @@ body {
 .palette-swatch {
     -webkit-appearance: none;
     appearance: none;
+    width: 148px;
     height: 44px;
-    min-width: 36px;
-    max-width: calc(100% - 8.5rem);
     padding: 0;
     border: 1px solid #282828;
     background: none;
     cursor: pointer;
-    flex: 0 0 auto;
+    flex: 0 0 148px;
     box-sizing: border-box;
 }
 

@@ -1059,12 +1059,16 @@ function App() {
                                 </div>
                             )}
                             <div className="palette-share-bar" aria-hidden="true">
-                                {clusters.map((c, i) => (
+                                {clusters
+                                    .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
+                                    .filter((item) => item.c?.rgb)
+                                    .sort((a, b) => a.share - b.share || a.i - b.i)
+                                    .map((item) => (
                                     <span
-                                        key={`${mode}-share-${i}`}
+                                        key={`${mode}-share-${item.i}`}
                                         style={{
-                                            flex: `${shareWeight(opaqueShares[i] ?? 0)} 1 0`,
-                                            background: rgbToHex(c.rgb),
+                                            flex: `${shareWeight(item.share)} 1 0`,
+                                            background: rgbToHex(item.c.rgb),
                                         }}
                                     />
                                 ))}
@@ -1082,7 +1086,6 @@ function App() {
                                                 value={hex}
                                                 aria-label={hex}
                                                 onChange={(e) => handleColorChange(i, e)}
-                                                style={{ width: `max(${share}%, 36px)` }}
                                             />
                                             <div className="palette-meta">
                                                 <button type="button" onClick={() => copyToClipboard(hex)}>
