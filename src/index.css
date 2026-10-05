@@ -325,32 +325,6 @@ body {
     align-items: stretch;
 }
 
-.side-swatch-list {
-    flex: 0 0 140px;
-    margin-top: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    text-align: left;
-    align-self: flex-start;
-}
-
-.swatch-chip {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    color: #333;
-}
-
-.swatch-chip-box {
-    width: 20px;
-    height: 20px;
-    flex: 0 0 20px;
-    border-radius: 4px;
-    border: 1px solid #ddd;
-}
-
 .panel-placeholder {
     display: flex;
     align-items: center;
@@ -622,13 +596,6 @@ body {
 
     .center-stage-portrait {
         flex-direction: column;
-    }
-
-    .side-swatch-list {
-        flex-direction: row;
-        flex-wrap: wrap;
-        flex-basis: auto;
-        justify-content: center;
     }
 
     .panel-right.layer-dock {

@@ -1270,26 +1270,7 @@ function App() {
                                         <img className="original-image checker-bg" src={imageData} alt="원본" />
                                     )}
                                 </div>
-                                {!isLandscape && clusters.length > 0 && (
-                                    <>
-                                        {renderShareBar("portrait-side", true)}
-                                        <div className="side-swatch-list">
-                                            {clusters
-                                                .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
-                                                .filter((item) => item.c?.rgb)
-                                                .sort((a, b) => b.share - a.share || a.i - b.i)
-                                                .map((item) => {
-                                                    const hex = rgbToHex(item.c.rgb);
-                                                    return (
-                                                        <div className="swatch-chip" key={`${mode}-chip-${item.i}`}>
-                                                            <span className="swatch-chip-box" style={{ background: hex }} />
-                                                            <span>{hex}</span>
-                                                        </div>
-                                                    );
-                                                })}
-                                        </div>
-                                    </>
-                                )}
+                                {!isLandscape && clusters.length > 0 && renderShareBar("portrait-side", true)}
                             </div>
                             {isLandscape && clusters.length > 0 && renderShareBar("bottom")}
                         </>
