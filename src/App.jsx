@@ -385,7 +385,7 @@ class PreviewBoundary extends Component {
 }
 
 function App() {
-    const [mode, setMode] = useState("manual");
+    const [mode, setMode] = useState("auto");
     const [imageData, setImageData] = useState(null);
     const [samplePoints, setSamplePoints] = useState([]);
     const [clusters, setClusters] = useState([]);
@@ -410,6 +410,8 @@ function App() {
     const [lineArtThumb, setLineArtThumb] = useState(null);
     const [loadError, setLoadError] = useState(null);
     const [uploadId, setUploadId] = useState(0);
+    const [copiedHex, setCopiedHex] = useState(null);
+    const copiedHexTimeoutRef = useRef(null);
     const fileInputRef = useRef(null);
     const canvasRef = useRef(null);
     const debounceTimeoutRef = useRef(null);
@@ -428,7 +430,7 @@ function App() {
     const clusterIdsRef = useRef(null);
     const manualSamplesRef = useRef(null);
     const manualCountRef = useRef(6);
-    const modeRef = useRef("manual");
+    const modeRef = useRef("auto");
 
     const updateCanvasAndLayers = (centers, paintMode) => {
         const stored = imageRef.current;
@@ -796,9 +798,17 @@ function App() {
         updateCanvasAndLayers(next, modeRef.current);
     };
 
+    const setAllColorsVisible = (visible) => {
+        const next = clusters.map(() => visible);
+        colorVisibleRef.current = next;
+        setColorVisible(next);
+    };
+
     const copyToClipboard = (hex) => {
         navigator.clipboard.writeText(hex).then(() => {
-            alert("HEX 코드가 클립보드에 복사되었습니다!");
+            setCopiedHex(hex);
+            clearTimeout(copiedHexTimeoutRef.current);
+            copiedHexTimeoutRef.current = setTimeout(() => setCopiedHex(null), 1200);
         });
     };
 
@@ -1004,6 +1014,34 @@ function App() {
                 />
             </div>
             <PreviewBoundary resetKey={uploadId}>
+            {clusters.length > 0 && (
+                <div className="palette-summary">
+                    <div style={{ fontSize: "22px", lineHeight: 1.2 }}>
+                        {clusters.length} swatches
+                    </div>
+                    {mode === "auto" && (
+                        <div style={{ marginTop: "4px", fontSize: "15px", color: "#505050" }}>
+                            stop ΔE {Math.round(deltaEStop)}
+                        </div>
+                    )}
+                    <div className="palette-share-bar" aria-hidden="true">
+                        {clusters
+                            .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
+                            .filter((item) => item.c?.rgb)
+                            .sort((a, b) => a.share - b.share || a.i - b.i)
+                            .map((item) => (
+                            <span
+                                key={`${mode}-share-${item.i}`}
+                                style={{
+                                    flex: `${shareWeight(item.share)} 1 0`,
+                                    background: rgbToHex(item.c.rgb),
+                                }}
+                            />
+                        ))}
+                    </div>
+                    {isUpdating && <p>색상 변경 중...</p>}
+                </div>
+            )}
             <div className="stage">
                 <div className="canvas-and-swatches">
                     {imageData && (
@@ -1040,70 +1078,39 @@ function App() {
                             <p style={{ margin: "0 0 8px", color: "#505050", fontSize: "14px" }}>
                                 미리보기를 클릭하면 그 색이 팔레트에 더해집니다.
                             </p>
-                            <canvas
-                                ref={previewCanvasRef}
-                                className="stage-canvas"
-                                onClick={addColorFromImage}
-                                aria-label="미리보기"
-                            />
-                        </div>
-                    )}
-                    {clusters.length > 0 && (
-                        <div className="palette-panel">
-                            <div style={{ fontSize: "22px", lineHeight: 1.2 }}>
-                                {clusters.length} swatches
-                            </div>
-                            {mode === "auto" && (
-                                <div style={{ marginTop: "4px", fontSize: "15px", color: "#505050" }}>
-                                    stop ΔE {Math.round(deltaEStop)}
+                            <div className="image-pair">
+                                <div className="image-frame">
+                                    <span className="image-frame-label">원본</span>
+                                    <img className="original-image checker-bg" src={imageData} alt="원본" />
                                 </div>
-                            )}
-                            <div className="palette-share-bar" aria-hidden="true">
-                                {clusters
-                                    .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
-                                    .filter((item) => item.c?.rgb)
-                                    .sort((a, b) => a.share - b.share || a.i - b.i)
-                                    .map((item) => (
-                                    <span
-                                        key={`${mode}-share-${item.i}`}
-                                        style={{
-                                            flex: `${shareWeight(item.share)} 1 0`,
-                                            background: rgbToHex(item.c.rgb),
-                                        }}
+                                <div className="image-frame">
+                                    <span className="image-frame-label">재색상</span>
+                                    <canvas
+                                        ref={previewCanvasRef}
+                                        className="stage-canvas checker-bg"
+                                        onClick={addColorFromImage}
+                                        aria-label="미리보기"
                                     />
-                                ))}
+                                </div>
                             </div>
-                            <div className="palette-rows">
-                                {clusters.map((c, i) => {
-                                    if (!c?.rgb) return null;
-                                    const hex = rgbToHex(c.rgb);
-                                    const share = opaqueShares[i] ?? 0;
-                                    return (
-                                        <div key={`${mode}-${i}`} className="palette-row">
-                                            <input
-                                                className="palette-swatch"
-                                                type="color"
-                                                value={hex}
-                                                aria-label={hex}
-                                                onChange={(e) => handleColorChange(i, e)}
-                                            />
-                                            <div className="palette-meta">
-                                                <button type="button" onClick={() => copyToClipboard(hex)}>
-                                                    {hex}
-                                                </button>
-                                                <div>{share.toFixed(1)}% opaque</div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                            {isUpdating && <p>색상 변경 중...</p>}
                         </div>
                     )}
                 </div>
                 {layersOpen && imageData && (
                     <aside className="layer-dock" aria-label="레이어">
-                        <div className="layer-dock-title">레이어</div>
+                        <div className="layer-dock-header">
+                            <span className="layer-dock-title">레이어</span>
+                            {clusters.length > 0 && (
+                                <div className="layer-dock-actions">
+                                    <button type="button" onClick={() => setAllColorsVisible(true)}>
+                                        전체 선택
+                                    </button>
+                                    <button type="button" onClick={() => setAllColorsVisible(false)}>
+                                        전체 해제
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                         {showInk && lineArtThumb && (
                             <label className="layer-row" data-hidden={lineArtVisible ? "false" : "true"}>
                                 <img src={lineArtThumb} alt="" />
@@ -1132,31 +1139,52 @@ function App() {
                                 }}
                             />
                         </label>
-                        {clusters.map((c, i) => {
-                            if (!c?.rgb) return null;
-                            const hex = rgbToHex(c.rgb);
-                            const shown = colorVisible[i] !== false;
-                            return (
-                                <label key={`${mode}-layer-${i}`} className="layer-row" data-hidden={shown ? "false" : "true"}>
-                                    {layerImages[i] ? <img src={layerImages[i]} alt="" /> : <span className="layer-thumb" />}
-                                    <span className="layer-name">{hex}</span>
-                                    <input
-                                        type="checkbox"
-                                        checked={shown}
-                                        aria-label={`${hex} 표시`}
-                                        onChange={(e) => {
-                                            const checked = e.target.checked;
-                                            setColorVisible((prev) => {
-                                                const next = clusters.map((_, index) => prev[index] !== false);
-                                                next[i] = checked;
-                                                colorVisibleRef.current = next;
-                                                return next;
-                                            });
-                                        }}
-                                    />
-                                </label>
-                            );
-                        })}
+                        {clusters
+                            .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
+                            .filter((item) => item.c?.rgb)
+                            .sort((a, b) => b.share - a.share || a.i - b.i)
+                            .map(({ c, i, share }) => {
+                                const hex = rgbToHex(c.rgb);
+                                const shown = colorVisible[i] !== false;
+                                return (
+                                    <label key={`${mode}-layer-${i}`} className="layer-row" data-hidden={shown ? "false" : "true"}>
+                                        <input
+                                            className="palette-swatch layer-swatch"
+                                            type="color"
+                                            value={hex}
+                                            aria-label={hex}
+                                            onChange={(e) => handleColorChange(i, e)}
+                                        />
+                                        <span className="layer-name">
+                                            <button
+                                                type="button"
+                                                className="layer-hex"
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    copyToClipboard(hex);
+                                                }}
+                                            >
+                                                {copiedHex === hex ? "복사됨" : hex}
+                                            </button>
+                                            <span className="layer-share">{share.toFixed(1)}% opaque</span>
+                                        </span>
+                                        <input
+                                            type="checkbox"
+                                            checked={shown}
+                                            aria-label={`${hex} 표시`}
+                                            onChange={(e) => {
+                                                const checked = e.target.checked;
+                                                setColorVisible((prev) => {
+                                                    const next = clusters.map((_, index) => prev[index] !== false);
+                                                    next[i] = checked;
+                                                    colorVisibleRef.current = next;
+                                                    return next;
+                                                });
+                                            }}
+                                        />
+                                    </label>
+                                );
+                            })}
                         <label className="layer-row" data-hidden={showOriginalLayer ? "false" : "true"}>
                             <img src={imageData} alt="" />
                             <span className="layer-name">원본</span>
