@@ -434,6 +434,12 @@ function App() {
     const [shadingVisible, setShadingVisible] = useState(false);
     const [lineArtVisible, setLineArtVisible] = useState(true);
     const [colorVisible, setColorVisible] = useState([]);
+    const [bgColor, setBgColor] = useState("#ffffff");
+    const [bgVisible, setBgVisible] = useState(true);
+    const [colorOpacity, setColorOpacity] = useState([]);
+    const [lineArtOpacity, setLineArtOpacity] = useState(100);
+    const [contourOpacity, setContourOpacity] = useState(100);
+    const [shadingOpacity, setShadingOpacity] = useState(100);
     const [contourThumb, setContourThumb] = useState(null);
     const [lineArtThumb, setLineArtThumb] = useState(null);
     const [loadError, setLoadError] = useState(null);
@@ -459,6 +465,12 @@ function App() {
     const showLinesRef = useRef(false);
     const lineArtVisibleRef = useRef(true);
     const colorVisibleRef = useRef([]);
+    const bgColorRef = useRef("#ffffff");
+    const bgVisibleRef = useRef(true);
+    const colorOpacityRef = useRef([]);
+    const lineArtOpacityRef = useRef(100);
+    const contourOpacityRef = useRef(100);
+    const shadingOpacityRef = useRef(100);
     const clustersRef = useRef([]);
     const clusterIdsRef = useRef(null);
     const manualSamplesRef = useRef(null);
@@ -588,6 +600,8 @@ function App() {
         setClusterCount(count);
         colorVisibleRef.current = centers.map(() => true);
         setColorVisible(colorVisibleRef.current);
+        colorOpacityRef.current = centers.map(() => 100);
+        setColorOpacity(colorOpacityRef.current);
         const stats = clusterStats(data, width, height, ids, centers);
         setOpaqueShares(stats.shares);
         setClusterPositions(stats.positions);
@@ -625,6 +639,8 @@ function App() {
         setClusterCount(centers.length);
         colorVisibleRef.current = centers.map(() => true);
         setColorVisible(colorVisibleRef.current);
+        colorOpacityRef.current = centers.map(() => 100);
+        setColorOpacity(colorOpacityRef.current);
         setDeltaEStop(extracted.deltaEStop);
         const stats = clusterStats(data, width, height, ids, centers);
         setOpaqueShares(stats.shares);
@@ -907,6 +923,12 @@ function App() {
     lineArtVisibleRef.current = lineArtVisible;
     colorVisibleRef.current = colorVisible;
     clustersRef.current = clusters;
+    bgColorRef.current = bgColor;
+    bgVisibleRef.current = bgVisible;
+    colorOpacityRef.current = colorOpacity;
+    lineArtOpacityRef.current = lineArtOpacity;
+    contourOpacityRef.current = contourOpacity;
+    shadingOpacityRef.current = shadingOpacity;
 
     const paintComposite = () => {
         const stored = imageRef.current;
@@ -924,50 +946,148 @@ function App() {
         if (!ctx) return;
         const frame = ctx.createImageData(width, height);
         const visibleColors = colorVisibleRef.current;
+        const opacities = colorOpacityRef.current;
+        const shadingOp = (shadingOpacityRef.current ?? 100) / 100;
+        const isShadingOn = shadingVisibleRef.current && shadingOp > 0;
+
+        const bgActive = bgVisibleRef.current;
+        const bgHex = bgColorRef.current || "#ffffff";
+        let bgR = 255, bgG = 255, bgB = 255;
+        if (bgHex.length === 7 && bgHex.startsWith("#")) {
+            bgR = parseInt(bgHex.slice(1, 3), 16);
+            bgG = parseInt(bgHex.slice(3, 5), 16);
+            bgB = parseInt(bgHex.slice(5, 7), 16);
+        }
+
+        if (bgActive) {
+            for (let i = 0; i < frame.data.length; i += 4) {
+                frame.data[i] = bgR;
+                frame.data[i + 1] = bgG;
+                frame.data[i + 2] = bgB;
+                frame.data[i + 3] = 255;
+            }
+        }
+
         for (let p = 0; p < ids.length; p++) {
             const offset = p * 4;
+            const origAlpha = stored.data[offset + 3];
+            if (origAlpha === 0) continue;
+
             const cluster = ids[p];
             const center = centers[cluster];
             if (center && visibleColors[cluster] !== false) {
-                const color = paintedChannels(stored.data, p, center, shadingVisibleRef.current);
-                frame.data[offset] = color[0];
-                frame.data[offset + 1] = color[1];
-                frame.data[offset + 2] = color[2];
-                frame.data[offset + 3] = stored.data[offset + 3];
+                const layerOp = (opacities[cluster] ?? 100) / 100;
+                if (layerOp <= 0) continue;
+
+                const color = paintedChannels(stored.data, p, center, isShadingOn);
+                let finalR = color[0];
+                let finalG = color[1];
+                let finalB = color[2];
+                if (shadingVisibleRef.current && shadingOp < 1.0) {
+                    const flat = center.rgb;
+                    finalR = Math.round(flat[0] * (1 - shadingOp) + color[0] * shadingOp);
+                    finalG = Math.round(flat[1] * (1 - shadingOp) + color[1] * shadingOp);
+                    finalB = Math.round(flat[2] * (1 - shadingOp) + color[2] * shadingOp);
+                }
+
+                const effectiveAlpha = (origAlpha / 255) * layerOp;
+
+                if (bgActive) {
+                    const destR = frame.data[offset];
+                    const destG = frame.data[offset + 1];
+                    const destB = frame.data[offset + 2];
+                    frame.data[offset] = Math.round(finalR * effectiveAlpha + destR * (1 - effectiveAlpha));
+                    frame.data[offset + 1] = Math.round(finalG * effectiveAlpha + destG * (1 - effectiveAlpha));
+                    frame.data[offset + 2] = Math.round(finalB * effectiveAlpha + destB * (1 - effectiveAlpha));
+                    frame.data[offset + 3] = 255;
+                } else {
+                    const destA = frame.data[offset + 3] / 255;
+                    if (destA === 0) {
+                        frame.data[offset] = finalR;
+                        frame.data[offset + 1] = finalG;
+                        frame.data[offset + 2] = finalB;
+                        frame.data[offset + 3] = Math.round(effectiveAlpha * 255);
+                    } else {
+                        const finalA = effectiveAlpha + destA * (1 - effectiveAlpha);
+                        if (finalA > 0) {
+                            frame.data[offset] = Math.round((finalR * effectiveAlpha + frame.data[offset] * destA * (1 - effectiveAlpha)) / finalA);
+                            frame.data[offset + 1] = Math.round((finalG * effectiveAlpha + frame.data[offset + 1] * destA * (1 - effectiveAlpha)) / finalA);
+                            frame.data[offset + 2] = Math.round((finalB * effectiveAlpha + frame.data[offset + 2] * destA * (1 - effectiveAlpha)) / finalA);
+                            frame.data[offset + 3] = Math.round(finalA * 255);
+                        }
+                    }
+                }
             }
         }
+
         if (showContourRef.current) {
-            if (!contourMaskRef.current || contourMaskRef.current.source !== stored.data) {
-                contourMaskRef.current = {
-                    source: stored.data,
-                    mask: dilate(contourMask(stored.data, width, height), width, height, 1),
-                };
-            }
-            const mask = contourMaskRef.current.mask;
-            for (let i = 0; i < mask.length; i++) {
-                if (!mask[i]) continue;
-                const offset = i * 4;
-                frame.data[offset] = 12;
-                frame.data[offset + 1] = 12;
-                frame.data[offset + 2] = 12;
-                frame.data[offset + 3] = 230;
+            const contourOp = (contourOpacityRef.current ?? 100) / 100;
+            if (contourOp > 0) {
+                if (!contourMaskRef.current || contourMaskRef.current.source !== stored.data) {
+                    contourMaskRef.current = {
+                        source: stored.data,
+                        mask: dilate(contourMask(stored.data, width, height), width, height, 1),
+                    };
+                }
+                const mask = contourMaskRef.current.mask;
+                const strokeAlpha = (230 / 255) * contourOp;
+                for (let i = 0; i < mask.length; i++) {
+                    if (!mask[i]) continue;
+                    const offset = i * 4;
+                    const destR = frame.data[offset];
+                    const destG = frame.data[offset + 1];
+                    const destB = frame.data[offset + 2];
+                    const destA = frame.data[offset + 3] / 255;
+
+                    if (bgActive || destA > 0) {
+                        frame.data[offset] = Math.round(12 * strokeAlpha + destR * (1 - strokeAlpha));
+                        frame.data[offset + 1] = Math.round(12 * strokeAlpha + destG * (1 - strokeAlpha));
+                        frame.data[offset + 2] = Math.round(12 * strokeAlpha + destB * (1 - strokeAlpha));
+                        frame.data[offset + 3] = bgActive ? 255 : Math.round((strokeAlpha + destA * (1 - strokeAlpha)) * 255);
+                    } else {
+                        frame.data[offset] = 12;
+                        frame.data[offset + 1] = 12;
+                        frame.data[offset + 2] = 12;
+                        frame.data[offset + 3] = Math.round(strokeAlpha * 255);
+                    }
+                }
             }
         }
+
         if (showLinesRef.current) {
             const edges = gradientEdges(stored.data, width, height);
+            const edgeAlpha = 230 / 255;
             for (let i = 0; i < edges.length; i++) {
                 if (!edges[i]) continue;
                 const offset = i * 4;
-                frame.data[offset] = 25;
-                frame.data[offset + 1] = 25;
-                frame.data[offset + 2] = 25;
-                frame.data[offset + 3] = 230;
+                const destR = frame.data[offset];
+                const destG = frame.data[offset + 1];
+                const destB = frame.data[offset + 2];
+                const destA = frame.data[offset + 3] / 255;
+                if (bgActive || destA > 0) {
+                    frame.data[offset] = Math.round(25 * edgeAlpha + destR * (1 - edgeAlpha));
+                    frame.data[offset + 1] = Math.round(25 * edgeAlpha + destG * (1 - edgeAlpha));
+                    frame.data[offset + 2] = Math.round(25 * edgeAlpha + destB * (1 - edgeAlpha));
+                    frame.data[offset + 3] = bgActive ? 255 : Math.round((edgeAlpha + destA * (1 - edgeAlpha)) * 255);
+                } else {
+                    frame.data[offset] = 25;
+                    frame.data[offset + 1] = 25;
+                    frame.data[offset + 2] = 25;
+                    frame.data[offset + 3] = Math.round(edgeAlpha * 255);
+                }
             }
         }
+
         ctx.putImageData(frame, 0, 0);
+
         const art = inkCacheRef.current;
         if (showInk && lineArtVisibleRef.current && art && art.source === stored.data) {
-            ctx.drawImage(inkPlate(art.art), 0, 0, width, height);
+            const inkOp = (lineArtOpacityRef.current ?? 100) / 100;
+            if (inkOp > 0) {
+                ctx.globalAlpha = inkOp;
+                ctx.drawImage(inkPlate(art.art), 0, 0, width, height);
+                ctx.globalAlpha = 1.0;
+            }
         }
         view.width = width;
         view.height = height;
@@ -1029,7 +1149,24 @@ function App() {
 
     useEffect(() => {
         paintComposite();
-    }, [imageData, clusters, colorVisible, showContourLayer, shadingVisible, lineArtVisible, showLines, showInk, lineArtThumb, isUpdating]);
+    }, [
+        imageData,
+        clusters,
+        colorVisible,
+        showContourLayer,
+        shadingVisible,
+        lineArtVisible,
+        showLines,
+        showInk,
+        lineArtThumb,
+        isUpdating,
+        bgColor,
+        bgVisible,
+        colorOpacity,
+        lineArtOpacity,
+        contourOpacity,
+        shadingOpacity,
+    ]);
 
     useEffect(() => {
         if (!isUpdating && clusters.length > 0 && clusterIdsRef.current && canvasRef.current) {
@@ -1303,46 +1440,112 @@ function App() {
                             )}
                         </div>
                         {showInk && lineArtThumb && (
-                            <label className="layer-row" data-hidden={lineArtVisible ? "false" : "true"}>
-                                <img src={lineArtThumb} alt="" />
-                                <span className="layer-name">선화</span>
+                            <div className="layer-row-wrapper">
+                                <label className="layer-row" data-hidden={lineArtVisible ? "false" : "true"}>
+                                    <img src={lineArtThumb} alt="" />
+                                    <span className="layer-name">
+                                        <span className="layer-name-top">선화</span>
+                                        <span className="layer-share">불투명도 {lineArtOpacity}%</span>
+                                    </span>
+                                    <input
+                                        type="checkbox"
+                                        checked={lineArtVisible}
+                                        aria-label="선화 표시"
+                                        onChange={(e) => {
+                                            lineArtVisibleRef.current = e.target.checked;
+                                            setLineArtVisible(e.target.checked);
+                                        }}
+                                    />
+                                </label>
+                                {lineArtVisible && (
+                                    <div className="layer-opacity-row">
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={lineArtOpacity}
+                                            aria-label="선화 불투명도"
+                                            onChange={(e) => {
+                                                const val = Number(e.target.value);
+                                                lineArtOpacityRef.current = val;
+                                                setLineArtOpacity(val);
+                                            }}
+                                        />
+                                        <span>{lineArtOpacity}%</span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        <div className="layer-row-wrapper">
+                            <label className="layer-row" data-hidden={showContourLayer ? "false" : "true"}>
+                                {contourThumb ? <img src={contourThumb} alt="" /> : <span className="layer-thumb" />}
+                                <span className="layer-name">
+                                    <span className="layer-name-top">윤곽선</span>
+                                    <span className="layer-share">불투명도 {contourOpacity}%</span>
+                                </span>
                                 <input
                                     type="checkbox"
-                                    checked={lineArtVisible}
-                                    aria-label="선화 표시"
+                                    checked={showContourLayer}
+                                    aria-label="윤곽선 표시"
                                     onChange={(e) => {
-                                        lineArtVisibleRef.current = e.target.checked;
-                                        setLineArtVisible(e.target.checked);
+                                        showContourRef.current = e.target.checked;
+                                        setShowContourLayer(e.target.checked);
                                     }}
                                 />
                             </label>
-                        )}
-                        <label className="layer-row" data-hidden={showContourLayer ? "false" : "true"}>
-                            {contourThumb ? <img src={contourThumb} alt="" /> : <span className="layer-thumb" />}
-                            <span className="layer-name">윤곽선</span>
-                            <input
-                                type="checkbox"
-                                checked={showContourLayer}
-                                aria-label="윤곽선 표시"
-                                onChange={(e) => {
-                                    showContourRef.current = e.target.checked;
-                                    setShowContourLayer(e.target.checked);
-                                }}
-                            />
-                        </label>
-                        <label className="layer-row" data-hidden={shadingVisible ? "false" : "true"}>
-                            <span className="layer-thumb" />
-                            <span className="layer-name">
-                                음영
-                                <span className="layer-share">원본의 명암을 색상 위에 겹쳐 보여줍니다</span>
-                            </span>
-                            <input
-                                type="checkbox"
-                                checked={shadingVisible}
-                                aria-label="음영 표시"
-                                onChange={(e) => setShadingVisible(e.target.checked)}
-                            />
-                        </label>
+                            {showContourLayer && (
+                                <div className="layer-opacity-row">
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="100"
+                                        value={contourOpacity}
+                                        aria-label="윤곽선 불투명도"
+                                        onChange={(e) => {
+                                            const val = Number(e.target.value);
+                                            contourOpacityRef.current = val;
+                                            setContourOpacity(val);
+                                        }}
+                                    />
+                                    <span>{contourOpacity}%</span>
+                                </div>
+                            )}
+                        </div>
+                        <div className="layer-row-wrapper">
+                            <label className="layer-row" data-hidden={shadingVisible ? "false" : "true"}>
+                                <span className="layer-thumb" />
+                                <span className="layer-name">
+                                    <span className="layer-name-top">음영</span>
+                                    <span className="layer-share">원본 명암 겹침 · {shadingOpacity}%</span>
+                                </span>
+                                <input
+                                    type="checkbox"
+                                    checked={shadingVisible}
+                                    aria-label="음영 표시"
+                                    onChange={(e) => {
+                                        shadingVisibleRef.current = e.target.checked;
+                                        setShadingVisible(e.target.checked);
+                                    }}
+                                />
+                            </label>
+                            {shadingVisible && (
+                                <div className="layer-opacity-row">
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="100"
+                                        value={shadingOpacity}
+                                        aria-label="음영 불투명도"
+                                        onChange={(e) => {
+                                            const val = Number(e.target.value);
+                                            shadingOpacityRef.current = val;
+                                            setShadingOpacity(val);
+                                        }}
+                                    />
+                                    <span>{shadingOpacity}%</span>
+                                </div>
+                            )}
+                        </div>
                         {clusters
                             .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
                             .filter((item) => item.c?.rgb)
@@ -1350,48 +1553,99 @@ function App() {
                             .map(({ c, i, share }) => {
                                 const hex = rgbToHex(c.rgb);
                                 const shown = colorVisible[i] !== false;
+                                const opacity = colorOpacity[i] ?? 100;
                                 return (
-                                    <label key={`${mode}-layer-${i}`} className="layer-row" data-hidden={shown ? "false" : "true"}>
-                                        {layerImages[i] ? <img src={layerImages[i]} alt="" /> : <span className="layer-thumb" />}
-                                        <span className="layer-name">
-                                            <span className="layer-name-top">
-                                                <input
-                                                    className="palette-swatch layer-dot"
-                                                    type="color"
-                                                    value={hex}
-                                                    aria-label={`${hex} 색상 수정`}
-                                                    onChange={(e) => handleColorChange(i, e)}
-                                                />
-                                                <button
-                                                    type="button"
-                                                    className="layer-hex"
-                                                    onClick={(e) => {
-                                                        e.preventDefault();
-                                                        copyToClipboard(hex);
-                                                    }}
-                                                >
-                                                    {copiedHex === hex ? "복사됨" : hex}
-                                                </button>
+                                    <div key={`${mode}-layer-${i}`} className="layer-row-wrapper">
+                                        <label className="layer-row" data-hidden={shown ? "false" : "true"}>
+                                            {layerImages[i] ? <img src={layerImages[i]} alt="" /> : <span className="layer-thumb" />}
+                                            <span className="layer-name">
+                                                <span className="layer-name-top">
+                                                    <input
+                                                        className="palette-swatch layer-dot"
+                                                        type="color"
+                                                        value={hex}
+                                                        aria-label={`${hex} 색상 수정`}
+                                                        onChange={(e) => handleColorChange(i, e)}
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        className="layer-hex"
+                                                        onClick={(e) => {
+                                                            e.preventDefault();
+                                                            copyToClipboard(hex);
+                                                        }}
+                                                    >
+                                                        {copiedHex === hex ? "복사됨" : hex}
+                                                    </button>
+                                                </span>
+                                                <span className="layer-share">{share.toFixed(1)}% · {opacity}%</span>
                                             </span>
-                                            <span className="layer-share">{share.toFixed(1)}% opaque</span>
-                                        </span>
-                                        <input
-                                            type="checkbox"
-                                            checked={shown}
-                                            aria-label={`${hex} 표시`}
-                                            onChange={(e) => {
-                                                const checked = e.target.checked;
-                                                setColorVisible((prev) => {
-                                                    const next = clusters.map((_, index) => prev[index] !== false);
-                                                    next[i] = checked;
-                                                    colorVisibleRef.current = next;
-                                                    return next;
-                                                });
-                                            }}
-                                        />
-                                    </label>
+                                            <input
+                                                type="checkbox"
+                                                checked={shown}
+                                                aria-label={`${hex} 표시`}
+                                                onChange={(e) => {
+                                                    const checked = e.target.checked;
+                                                    setColorVisible((prev) => {
+                                                        const next = clusters.map((_, index) => prev[index] !== false);
+                                                        next[i] = checked;
+                                                        colorVisibleRef.current = next;
+                                                        return next;
+                                                    });
+                                                }}
+                                            />
+                                        </label>
+                                        {shown && (
+                                            <div className="layer-opacity-row">
+                                                <input
+                                                    type="range"
+                                                    min="0"
+                                                    max="100"
+                                                    value={opacity}
+                                                    aria-label={`${hex} 불투명도`}
+                                                    onChange={(e) => {
+                                                        const val = Number(e.target.value);
+                                                        setColorOpacity((prev) => {
+                                                            const next = clusters.map((_, idx) => prev[idx] ?? 100);
+                                                            next[i] = val;
+                                                            colorOpacityRef.current = next;
+                                                            return next;
+                                                        });
+                                                    }}
+                                                />
+                                                <span>{opacity}%</span>
+                                            </div>
+                                        )}
+                                    </div>
                                 );
                             })}
+                        <div className="layer-row-wrapper layer-row-bg-wrapper">
+                            <label className="layer-row layer-row-bg" data-hidden={bgVisible ? "false" : "true"}>
+                                <input
+                                    className="palette-swatch layer-dot"
+                                    type="color"
+                                    value={bgColor}
+                                    aria-label="배경 색상 변경"
+                                    onChange={(e) => {
+                                        bgColorRef.current = e.target.value;
+                                        setBgColor(e.target.value);
+                                    }}
+                                />
+                                <span className="layer-name">
+                                    <span className="layer-name-top">배경 색상</span>
+                                    <span className="layer-share">{bgColor.toUpperCase()}</span>
+                                </span>
+                                <input
+                                    type="checkbox"
+                                    checked={bgVisible}
+                                    aria-label="배경 색상 표시"
+                                    onChange={(e) => {
+                                        bgVisibleRef.current = e.target.checked;
+                                        setBgVisible(e.target.checked);
+                                    }}
+                                />
+                            </label>
+                        </div>
                     </aside>
                 )}
             </div>

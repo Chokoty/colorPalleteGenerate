@@ -506,6 +506,48 @@ body {
     cursor: pointer;
 }
 
+.layer-row-wrapper {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+}
+
+.layer-row-wrapper:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.layer-opacity-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 8px 4px 56px;
+}
+
+.layer-opacity-row input[type="range"] {
+    flex: 1 1 auto;
+    height: 4px;
+    border-radius: 2px;
+    accent-color: #3b82f6;
+    cursor: pointer;
+    background: #3a3a3c;
+}
+
+.layer-opacity-row span {
+    flex: 0 0 34px;
+    font-size: 11px;
+    color: #bdbdbd;
+    text-align: right;
+}
+
+.layer-row-bg-wrapper {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+
 .layer-row {
     display: flex;
     align-items: center;
