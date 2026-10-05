@@ -1038,6 +1038,24 @@ function App() {
     }, [clusters, isUpdating]);
 
     const isLandscape = !imageInfo || imageInfo.width >= imageInfo.height;
+    const shareBarItems = clusters
+        .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
+        .filter((item) => item.c?.rgb)
+        .sort((a, b) => a.share - b.share || a.i - b.i);
+    const renderShareBar = (keyPrefix) => (
+        <div className="palette-share-bar" aria-hidden="true">
+            {shareBarItems.map((item) => (
+                <span
+                    key={`${keyPrefix}-${item.i}`}
+                    style={{
+                        flex: `${shareWeight(item.share)} 1 0`,
+                        background: rgbToHex(item.c.rgb),
+                    }}
+                    data-tooltip={`${rgbToHex(item.c.rgb)} · ${item.share.toFixed(1)}%`}
+                />
+            ))}
+        </div>
+    );
 
     return (
         <div
@@ -1048,30 +1066,6 @@ function App() {
                 minHeight: "100vh",
             }}
         >
-            {imageData && (
-                <header className="app-header">
-                    <div className="header-toolbar">
-                        <label className="header-toolbar-check">
-                            <input
-                                type="checkbox"
-                                checked={showLines}
-                                onChange={(e) => setShowLines(e.target.checked)}
-                            />
-                            {" 선 필터"}
-                        </label>
-                        <label className="header-toolbar-check">
-                            <input
-                                type="checkbox"
-                                checked={showInk}
-                                onChange={(e) => setShowInk(e.target.checked)}
-                            />
-                            {" 선화 추출"}
-                        </label>
-                        {inkNote && <span className="header-toolbar-note">{inkNote}</span>}
-                    </div>
-                    <p className="app-header-hint">미리보기를 클릭하면 그 색이 팔레트에 더해집니다.</p>
-                </header>
-            )}
             {loadError && <p>{loadError}</p>}
             <PreviewBoundary resetKey={uploadId}>
             <div className="workspace">
@@ -1223,9 +1217,30 @@ function App() {
                                             stop ΔE {Math.round(deltaEStop)}
                                         </div>
                                     )}
+                                    {renderShareBar("top")}
                                     {isUpdating && <p>색상 변경 중...</p>}
                                 </div>
                             )}
+                            <div className="header-toolbar">
+                                <label className="header-toolbar-check">
+                                    <input
+                                        type="checkbox"
+                                        checked={showLines}
+                                        onChange={(e) => setShowLines(e.target.checked)}
+                                    />
+                                    {" 선 필터"}
+                                </label>
+                                <label className="header-toolbar-check">
+                                    <input
+                                        type="checkbox"
+                                        checked={showInk}
+                                        onChange={(e) => setShowInk(e.target.checked)}
+                                    />
+                                    {" 선화 추출"}
+                                </label>
+                                {inkNote && <span className="header-toolbar-note">{inkNote}</span>}
+                            </div>
+                            <p className="app-header-hint">미리보기를 클릭하면 그 색이 팔레트에 더해집니다.</p>
                             <div className="mode-tabs image-tabs">
                                 <button
                                     type="button"
@@ -1273,24 +1288,7 @@ function App() {
                                     </div>
                                 )}
                             </div>
-                            {isLandscape && clusters.length > 0 && (
-                                <div className="palette-share-bar" aria-hidden="true">
-                                    {clusters
-                                        .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
-                                        .filter((item) => item.c?.rgb)
-                                        .sort((a, b) => a.share - b.share || a.i - b.i)
-                                        .map((item) => (
-                                        <span
-                                            key={`${mode}-share-${item.i}`}
-                                            style={{
-                                                flex: `${shareWeight(item.share)} 1 0`,
-                                                background: rgbToHex(item.c.rgb),
-                                            }}
-                                            data-tooltip={`${rgbToHex(item.c.rgb)} · ${item.share.toFixed(1)}%`}
-                                        />
-                                    ))}
-                                </div>
-                            )}
+                            {isLandscape && clusters.length > 0 && renderShareBar("bottom")}
                         </>
                     )}
                 </main>
