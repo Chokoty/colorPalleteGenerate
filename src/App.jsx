@@ -472,7 +472,7 @@ function App() {
         if (!canvasRef.current || !stored || !ids || centers.length === 0) return;
         try {
         const paintBody = () => {
-        const { width, height } = stored;
+        const { data, width, height } = stored;
         const canvas = canvasRef.current;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
@@ -487,7 +487,7 @@ function App() {
             frame.data[i] = color[0];
             frame.data[i + 1] = color[1];
             frame.data[i + 2] = color[2];
-            frame.data[i + 3] = 255;
+            frame.data[i + 3] = data[i + 3];
         }
         ctx.putImageData(frame, 0, 0);
         const timeTaken = (performance.now() - startTime).toFixed(2);
@@ -523,7 +523,7 @@ function App() {
                 layerData.data[idx] = color[0];
                 layerData.data[idx + 1] = color[1];
                 layerData.data[idx + 2] = color[2];
-                layerData.data[idx + 3] = 255;
+                layerData.data[idx + 3] = data[idx + 3];
             }
             layerCtx.putImageData(layerData, 0, 0);
             thumbCtx.clearRect(0, 0, preview.width, preview.height);
@@ -937,7 +937,7 @@ function App() {
                 frame.data[offset] = color[0];
                 frame.data[offset + 1] = color[1];
                 frame.data[offset + 2] = color[2];
-                frame.data[offset + 3] = 255;
+                frame.data[offset + 3] = stored.data[offset + 3];
             } else if (showOriginal) {
                 frame.data[offset] = stored.data[offset];
                 frame.data[offset + 1] = stored.data[offset + 1];
