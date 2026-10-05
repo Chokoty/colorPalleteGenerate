@@ -199,14 +199,27 @@ body {
     box-sizing: border-box;
 }
 
+.palette-share-bar-vertical {
+    flex-direction: column;
+    width: 22px;
+    height: auto;
+    flex: 0 0 22px;
+    align-self: stretch;
+    margin-top: 12px;
+}
+
 .palette-share-bar > span {
     display: block;
     height: 100%;
     min-width: 4px;
+    position: relative;
 }
 
-.palette-share-bar > span {
-    position: relative;
+.palette-share-bar-vertical > span {
+    width: 100%;
+    height: auto;
+    min-width: 0;
+    min-height: 4px;
 }
 
 .palette-share-bar > span:hover::after,
@@ -225,6 +238,16 @@ body {
     border-radius: 6px;
     pointer-events: none;
     z-index: 20;
+}
+
+.palette-share-bar-vertical > span:hover::after {
+    bottom: auto;
+    top: 50%;
+    left: auto;
+    right: 100%;
+    transform: translateY(-50%);
+    margin-bottom: 0;
+    margin-right: 6px;
 }
 
 .palette-swatch {
@@ -299,7 +322,7 @@ body {
 }
 
 .center-stage-portrait {
-    align-items: center;
+    align-items: stretch;
 }
 
 .side-swatch-list {
@@ -309,6 +332,7 @@ body {
     flex-direction: column;
     gap: 8px;
     text-align: left;
+    align-self: flex-start;
 }
 
 .swatch-chip {

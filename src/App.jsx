@@ -1042,8 +1042,8 @@ function App() {
         .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
         .filter((item) => item.c?.rgb)
         .sort((a, b) => a.share - b.share || a.i - b.i);
-    const renderShareBar = (keyPrefix) => (
-        <div className="palette-share-bar" aria-hidden="true">
+    const renderShareBar = (keyPrefix, isVertical = false) => (
+        <div className={`palette-share-bar${isVertical ? " palette-share-bar-vertical" : ""}`} aria-hidden="true">
             {shareBarItems.map((item) => (
                 <span
                     key={`${keyPrefix}-${item.i}`}
@@ -1271,21 +1271,24 @@ function App() {
                                     )}
                                 </div>
                                 {!isLandscape && clusters.length > 0 && (
-                                    <div className="side-swatch-list">
-                                        {clusters
-                                            .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
-                                            .filter((item) => item.c?.rgb)
-                                            .sort((a, b) => b.share - a.share || a.i - b.i)
-                                            .map((item) => {
-                                                const hex = rgbToHex(item.c.rgb);
-                                                return (
-                                                    <div className="swatch-chip" key={`${mode}-chip-${item.i}`}>
-                                                        <span className="swatch-chip-box" style={{ background: hex }} />
-                                                        <span>{hex}</span>
-                                                    </div>
-                                                );
-                                            })}
-                                    </div>
+                                    <>
+                                        {renderShareBar("portrait-side", true)}
+                                        <div className="side-swatch-list">
+                                            {clusters
+                                                .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
+                                                .filter((item) => item.c?.rgb)
+                                                .sort((a, b) => b.share - a.share || a.i - b.i)
+                                                .map((item) => {
+                                                    const hex = rgbToHex(item.c.rgb);
+                                                    return (
+                                                        <div className="swatch-chip" key={`${mode}-chip-${item.i}`}>
+                                                            <span className="swatch-chip-box" style={{ background: hex }} />
+                                                            <span>{hex}</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                        </div>
+                                    </>
                                 )}
                             </div>
                             {isLandscape && clusters.length > 0 && renderShareBar("bottom")}
