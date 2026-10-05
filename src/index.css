@@ -276,6 +276,57 @@ body {
     margin-top: 12px;
 }
 
+.image-tabs {
+    margin-top: 12px;
+    justify-content: center;
+}
+
+.image-tabs .mode-tab {
+    flex: 0 0 auto;
+    padding: 6px 18px;
+}
+
+.center-stage {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    justify-content: center;
+}
+
+.center-stage .panel-image {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.center-stage-portrait {
+    align-items: center;
+}
+
+.side-swatch-list {
+    flex: 0 0 140px;
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: left;
+}
+
+.swatch-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #333;
+}
+
+.swatch-chip-box {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+}
+
 .panel-placeholder {
     display: flex;
     align-items: center;
@@ -353,6 +404,14 @@ body {
     font-size: 14px;
 }
 
+.app-header-hint {
+    flex: 0 0 100%;
+    margin: 8px 0 0;
+    text-align: center;
+    color: #505050;
+    font-size: 14px;
+}
+
 .checker-bg {
     background-color: #f5f5f5;
     background-image:
@@ -407,17 +466,9 @@ body {
     cursor: default;
 }
 
-.panel-right-col {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+.layer-dock {
     flex: 0 0 260px;
     width: 260px;
-}
-
-.layer-dock {
-    flex: 0 0 auto;
-    width: 100%;
     max-height: 640px;
     overflow: auto;
     box-sizing: border-box;
@@ -555,10 +606,21 @@ body {
     }
 
     .panel-left,
-    .panel-right-col,
+    .panel-right.layer-dock,
     .panel-center {
         width: 100%;
         flex-basis: auto;
+    }
+
+    .center-stage-portrait {
+        flex-direction: column;
+    }
+
+    .side-swatch-list {
+        flex-direction: row;
+        flex-wrap: wrap;
+        flex-basis: auto;
+        justify-content: center;
     }
 
     .panel-right.layer-dock {

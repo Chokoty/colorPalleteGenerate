@@ -430,7 +430,6 @@ function App() {
     const [inkNote, setInkNote] = useState("");
     const [layersOpen, setLayersOpen] = useState(() => window.matchMedia("(min-width: 721px)").matches);
     const [dragActive, setDragActive] = useState(false);
-    const [showOriginalLayer, setShowOriginalLayer] = useState(false);
     const [showContourLayer, setShowContourLayer] = useState(false);
     const [shadingVisible, setShadingVisible] = useState(false);
     const [lineArtVisible, setLineArtVisible] = useState(true);
@@ -442,6 +441,7 @@ function App() {
     const [isLoadingImage, setIsLoadingImage] = useState(false);
     const [imageInfo, setImageInfo] = useState(null);
     const [clusterPositions, setClusterPositions] = useState([]);
+    const [centerTab, setCenterTab] = useState("recolor");
     const [copiedHex, setCopiedHex] = useState(null);
     const copiedHexTimeoutRef = useRef(null);
     const fileInputRef = useRef(null);
@@ -454,7 +454,6 @@ function App() {
     const inkRequestRef = useRef(0);
     const inkCacheRef = useRef(null);
     const contourMaskRef = useRef(null);
-    const showOriginalRef = useRef(false);
     const showContourRef = useRef(false);
     const shadingVisibleRef = useRef(false);
     const showLinesRef = useRef(false);
@@ -678,16 +677,15 @@ function App() {
                     previewRef.current = stored;
                     inkCacheRef.current = null;
                     contourMaskRef.current = null;
-                    showOriginalRef.current = false;
                     showContourRef.current = false;
                     lineArtVisibleRef.current = true;
                     colorVisibleRef.current = [];
-                    setShowOriginalLayer(false);
                     setShowContourLayer(false);
                     setLineArtVisible(true);
                     setColorVisible([]);
                     setContourThumb(null);
                     setLineArtThumb(null);
+                    setCenterTab("recolor");
                     setImageData(canvas.toDataURL());
                     setUploadId((id) => id + 1);
                     setLoadError(null);
@@ -903,7 +901,6 @@ function App() {
         });
     };
 
-    showOriginalRef.current = showOriginalLayer;
     showContourRef.current = showContourLayer;
     shadingVisibleRef.current = shadingVisible;
     showLinesRef.current = showLines;
@@ -927,7 +924,6 @@ function App() {
         if (!ctx) return;
         const frame = ctx.createImageData(width, height);
         const visibleColors = colorVisibleRef.current;
-        const showOriginal = showOriginalRef.current;
         for (let p = 0; p < ids.length; p++) {
             const offset = p * 4;
             const cluster = ids[p];
@@ -937,11 +933,6 @@ function App() {
                 frame.data[offset] = color[0];
                 frame.data[offset + 1] = color[1];
                 frame.data[offset + 2] = color[2];
-                frame.data[offset + 3] = stored.data[offset + 3];
-            } else if (showOriginal) {
-                frame.data[offset] = stored.data[offset];
-                frame.data[offset + 1] = stored.data[offset + 1];
-                frame.data[offset + 2] = stored.data[offset + 2];
                 frame.data[offset + 3] = stored.data[offset + 3];
             }
         }
@@ -1038,13 +1029,15 @@ function App() {
 
     useEffect(() => {
         paintComposite();
-    }, [imageData, clusters, colorVisible, showOriginalLayer, showContourLayer, shadingVisible, lineArtVisible, showLines, showInk, lineArtThumb, isUpdating]);
+    }, [imageData, clusters, colorVisible, showContourLayer, shadingVisible, lineArtVisible, showLines, showInk, lineArtThumb, isUpdating]);
 
     useEffect(() => {
         if (!isUpdating && clusters.length > 0 && clusterIdsRef.current && canvasRef.current) {
             updateCanvasAndLayers(clusters);
         }
     }, [clusters, isUpdating]);
+
+    const isLandscape = !imageInfo || imageInfo.width >= imageInfo.height;
 
     return (
         <div
@@ -1076,6 +1069,7 @@ function App() {
                         </label>
                         {inkNote && <span className="header-toolbar-note">{inkNote}</span>}
                     </div>
+                    <p className="app-header-hint">미리보기를 클릭하면 그 색이 팔레트에 더해집니다.</p>
                 </header>
             )}
             {loadError && <p>{loadError}</p>}
@@ -1193,6 +1187,24 @@ function App() {
                             )}
                         </div>
                     )}
+                    {samplePoints.length > 0 && (
+                        <div className="scene-block">
+                            <p>재색상화 시간: {recolorTime}ms</p>
+                            <Scene
+                                points={samplePoints}
+                                clusters={clusters.filter((c) => c?.rgb).map((c) => c.rgb)}
+                                showConvexHull={showConvexHull}
+                            />
+                            <label className="scene-hull-toggle">
+                                <input
+                                    type="checkbox"
+                                    checked={showConvexHull}
+                                    onChange={(e) => setShowConvexHull(e.target.checked)}
+                                />
+                                Show Convex Hull
+                            </label>
+                        </div>
+                    )}
                 </aside>
 
                 <main className="panel panel-center">
@@ -1211,42 +1223,78 @@ function App() {
                                             stop ΔE {Math.round(deltaEStop)}
                                         </div>
                                     )}
-                                    <div className="palette-share-bar" aria-hidden="true">
-                                        {clusters
-                                            .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
-                                            .filter((item) => item.c?.rgb)
-                                            .sort((a, b) => a.share - b.share || a.i - b.i)
-                                            .map((item) => (
-                                            <span
-                                                key={`${mode}-share-${item.i}`}
-                                                style={{
-                                                    flex: `${shareWeight(item.share)} 1 0`,
-                                                    background: rgbToHex(item.c.rgb),
-                                                }}
-                                                data-tooltip={`${rgbToHex(item.c.rgb)} · ${item.share.toFixed(1)}%`}
-                                            />
-                                        ))}
-                                    </div>
                                     {isUpdating && <p>색상 변경 중...</p>}
                                 </div>
                             )}
-                            <p style={{ margin: "0 0 8px", color: "#505050", fontSize: "14px" }}>
-                                미리보기를 클릭하면 그 색이 팔레트에 더해집니다.
-                            </p>
-                            <div className="panel-image">
-                                <span className="image-frame-label">재색상</span>
-                                <canvas
-                                    ref={previewCanvasRef}
-                                    className="stage-canvas checker-bg"
-                                    onClick={addColorFromImage}
-                                    aria-label="미리보기"
-                                />
+                            <div className="mode-tabs image-tabs">
+                                <button
+                                    type="button"
+                                    className={`mode-tab${centerTab === "recolor" ? " mode-tab-active" : ""}`}
+                                    onClick={() => setCenterTab("recolor")}
+                                >
+                                    재색상
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`mode-tab${centerTab === "original" ? " mode-tab-active" : ""}`}
+                                    onClick={() => setCenterTab("original")}
+                                >
+                                    원본
+                                </button>
                             </div>
+                            <div className={`center-stage${isLandscape ? "" : " center-stage-portrait"}`}>
+                                <div className="panel-image">
+                                    {centerTab === "recolor" ? (
+                                        <canvas
+                                            ref={previewCanvasRef}
+                                            className="stage-canvas checker-bg"
+                                            onClick={addColorFromImage}
+                                            aria-label="미리보기"
+                                        />
+                                    ) : (
+                                        <img className="original-image checker-bg" src={imageData} alt="원본" />
+                                    )}
+                                </div>
+                                {!isLandscape && clusters.length > 0 && (
+                                    <div className="side-swatch-list">
+                                        {clusters
+                                            .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
+                                            .filter((item) => item.c?.rgb)
+                                            .sort((a, b) => b.share - a.share || a.i - b.i)
+                                            .map((item) => {
+                                                const hex = rgbToHex(item.c.rgb);
+                                                return (
+                                                    <div className="swatch-chip" key={`${mode}-chip-${item.i}`}>
+                                                        <span className="swatch-chip-box" style={{ background: hex }} />
+                                                        <span>{hex}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                    </div>
+                                )}
+                            </div>
+                            {isLandscape && clusters.length > 0 && (
+                                <div className="palette-share-bar" aria-hidden="true">
+                                    {clusters
+                                        .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
+                                        .filter((item) => item.c?.rgb)
+                                        .sort((a, b) => a.share - b.share || a.i - b.i)
+                                        .map((item) => (
+                                        <span
+                                            key={`${mode}-share-${item.i}`}
+                                            style={{
+                                                flex: `${shareWeight(item.share)} 1 0`,
+                                                background: rgbToHex(item.c.rgb),
+                                            }}
+                                            data-tooltip={`${rgbToHex(item.c.rgb)} · ${item.share.toFixed(1)}%`}
+                                        />
+                                    ))}
+                                </div>
+                            )}
                         </>
                     )}
                 </main>
 
-                <div className="panel-right-col">
                 {layersOpen && !imageData && (
                     <aside className="panel panel-right layer-dock" aria-label="레이어">
                         <div className="layer-dock-header">
@@ -1362,40 +1410,8 @@ function App() {
                                     </label>
                                 );
                             })}
-                        <label className="layer-row" data-hidden={showOriginalLayer ? "false" : "true"}>
-                            <img src={imageData} alt="" />
-                            <span className="layer-name">원본</span>
-                            <input
-                                type="checkbox"
-                                checked={showOriginalLayer}
-                                aria-label="원본 표시"
-                                onChange={(e) => {
-                                    showOriginalRef.current = e.target.checked;
-                                    setShowOriginalLayer(e.target.checked);
-                                }}
-                            />
-                        </label>
                     </aside>
                 )}
-                {samplePoints.length > 0 && (
-                    <div className="scene-block">
-                        <p>재색상화 시간: {recolorTime}ms</p>
-                        <Scene
-                            points={samplePoints}
-                            clusters={clusters.filter((c) => c?.rgb).map((c) => c.rgb)}
-                            showConvexHull={showConvexHull}
-                        />
-                        <label className="scene-hull-toggle">
-                            <input
-                                type="checkbox"
-                                checked={showConvexHull}
-                                onChange={(e) => setShowConvexHull(e.target.checked)}
-                            />
-                            Show Convex Hull
-                        </label>
-                    </div>
-                )}
-                </div>
             </div>
             </PreviewBoundary>
         </div>
