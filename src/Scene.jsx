@@ -390,8 +390,8 @@ export default function Scene({
     return (
         <Canvas
             style={{
-                width: "40%",
-                height: "50vh",
+                width: "100%",
+                height: "260px",
                 margin: "0 auto",
                 background: "#808080",
             }}

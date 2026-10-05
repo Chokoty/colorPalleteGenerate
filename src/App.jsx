@@ -234,35 +234,43 @@ function rgbToHex(rgb) {
     return `#${channel(rgb[0])}${channel(rgb[1])}${channel(rgb[2])}`;
 }
 
-// Share of opaque pixels (alpha ≥ 128) whose color is nearest this swatch.
-// The percentage describes the picture, the same way the palette sheet does,
-// and it ignores the transparent fringe.
-function opaqueSharePercents(data, centers) {
+// Share of opaque pixels (alpha ≥ 128) assigned to each swatch, plus one
+// pin position per swatch: the actual pixel whose own color is closest to
+// the swatch, not the average position of every assigned pixel. A sprawling,
+// non-convex region (hair wrapping around a face, a background split by the
+// subject) has an arithmetic-mean position that can fall outside the region
+// entirely — e.g. dead center on the face. Picking the best-matching real
+// pixel instead guarantees the pin sits on an actual occurrence of that
+// color. Reads the same `ids` the recolor pass already computed (manual's
+// RGB+XY assignment or auto's Lab+XY one), so shares match what's rendered.
+function clusterStats(data, width, height, ids, centers) {
     const counts = new Array(centers.length).fill(0);
+    const bestDist = new Array(centers.length).fill(Infinity);
+    const bestX = new Array(centers.length).fill(0);
+    const bestY = new Array(centers.length).fill(0);
     let opaque = 0;
-    const numPixels = data.length / 4;
-    for (let i = 0; i < numPixels; i++) {
+    for (let i = 0; i < ids.length; i++) {
         const offset = i * 4;
         if (data[offset + 3] < 128) continue;
         opaque++;
-        let best = 0;
-        let bestDist = Infinity;
+        const cluster = ids[i];
+        const center = centers[cluster];
+        if (!center) continue;
+        counts[cluster]++;
         const r = data[offset] / 255;
         const g = data[offset + 1] / 255;
         const b = data[offset + 2] / 255;
-        for (let c = 0; c < centers.length; c++) {
-            const center = centers[c].rgb;
-            const dist =
-                (r - center[0]) ** 2 + (g - center[1]) ** 2 + (b - center[2]) ** 2;
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = c;
-            }
+        const dist =
+            (r - center.rgb[0]) ** 2 + (g - center.rgb[1]) ** 2 + (b - center.rgb[2]) ** 2;
+        if (dist < bestDist[cluster]) {
+            bestDist[cluster] = dist;
+            bestX[cluster] = (i % width) / width;
+            bestY[cluster] = Math.floor(i / width) / height;
         }
-        counts[best]++;
     }
-    if (opaque === 0) return counts.map(() => 0);
-    return counts.map((n) => (100 * n) / opaque);
+    const shares = opaque === 0 ? counts.map(() => 0) : counts.map((n) => (100 * n) / opaque);
+    const positions = counts.map((n, c) => (n === 0 ? null : { x: bestX[c], y: bestY[c] }));
+    return { shares, positions };
 }
 
 // Tiny shares still take a visible slice. The printed percent stays exact.
@@ -331,20 +339,39 @@ function lineArtThumbnail(art) {
     return canvas.toDataURL();
 }
 
-function paintedChannels(data, index, center, paintMode) {
-    const offset = index * 4;
-    if (paintMode === "auto") {
-        const color = recolorPixel(
-            [data[offset], data[offset + 1], data[offset + 2]],
-            [center.rgb[0] * 255, center.rgb[1] * 255, center.rgb[2] * 255]
-        );
-        return [Math.floor(color[0]), Math.floor(color[1]), Math.floor(color[2])];
-    }
+// Swatches themselves stay flat. Shading is a separate, optional layer: it
+// keeps each pixel's own lightness from the source photo and only swaps in
+// the swatch's hue/chroma, so shadows and highlights can be toggled without
+// touching the flat color underneath.
+function flatChannels(center) {
     return [
         Math.floor(center.rgb[0] * 255),
         Math.floor(center.rgb[1] * 255),
         Math.floor(center.rgb[2] * 255),
     ];
+}
+
+function paintedChannels(data, index, center, shaded) {
+    if (!shaded) return flatChannels(center);
+    const offset = index * 4;
+    const color = recolorPixel(
+        [data[offset], data[offset + 1], data[offset + 2]],
+        [center.rgb[0] * 255, center.rgb[1] * 255, center.rgb[2] * 255]
+    );
+    return [Math.floor(color[0]), Math.floor(color[1]), Math.floor(color[2])];
+}
+
+function formatBytes(bytes) {
+    if (!Number.isFinite(bytes)) return "";
+    if (bytes < 1024) return `${bytes}B`;
+    const units = ["KB", "MB", "GB"];
+    let value = bytes / 1024;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex++;
+    }
+    return `${value.toFixed(value < 10 ? 1 : 0)}${units[unitIndex]}`;
 }
 
 function fitInside(width, height, maxSide) {
@@ -402,19 +429,25 @@ function App() {
     const [showInk, setShowInk] = useState(false);
     const [inkNote, setInkNote] = useState("");
     const [layersOpen, setLayersOpen] = useState(() => window.matchMedia("(min-width: 721px)").matches);
+    const [dragActive, setDragActive] = useState(false);
     const [showOriginalLayer, setShowOriginalLayer] = useState(false);
     const [showContourLayer, setShowContourLayer] = useState(false);
+    const [shadingVisible, setShadingVisible] = useState(false);
     const [lineArtVisible, setLineArtVisible] = useState(true);
     const [colorVisible, setColorVisible] = useState([]);
     const [contourThumb, setContourThumb] = useState(null);
     const [lineArtThumb, setLineArtThumb] = useState(null);
     const [loadError, setLoadError] = useState(null);
     const [uploadId, setUploadId] = useState(0);
+    const [isLoadingImage, setIsLoadingImage] = useState(false);
+    const [imageInfo, setImageInfo] = useState(null);
+    const [clusterPositions, setClusterPositions] = useState([]);
     const [copiedHex, setCopiedHex] = useState(null);
     const copiedHexTimeoutRef = useRef(null);
     const fileInputRef = useRef(null);
     const canvasRef = useRef(null);
     const debounceTimeoutRef = useRef(null);
+    const weightDebounceRef = useRef(null);
     const imageRef = useRef(null);
     const previewRef = useRef(null);
     const previewCanvasRef = useRef(null);
@@ -423,6 +456,7 @@ function App() {
     const contourMaskRef = useRef(null);
     const showOriginalRef = useRef(false);
     const showContourRef = useRef(false);
+    const shadingVisibleRef = useRef(false);
     const showLinesRef = useRef(false);
     const lineArtVisibleRef = useRef(true);
     const colorVisibleRef = useRef([]);
@@ -432,14 +466,13 @@ function App() {
     const manualCountRef = useRef(6);
     const modeRef = useRef("auto");
 
-    const updateCanvasAndLayers = (centers, paintMode) => {
+    const updateCanvasAndLayers = (centers) => {
         const stored = imageRef.current;
         const ids = clusterIdsRef.current;
         if (!canvasRef.current || !stored || !ids || centers.length === 0) return;
         try {
         const paintBody = () => {
-        const { data, width, height } = stored;
-        const modeName = paintMode || modeRef.current;
+        const { width, height } = stored;
         const canvas = canvasRef.current;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
@@ -449,7 +482,7 @@ function App() {
         for (let p = 0; p < ids.length; p++) {
             const center = centers[ids[p]];
             if (!center) continue;
-            const color = paintedChannels(data, p, center, modeName);
+            const color = flatChannels(center);
             const i = p * 4;
             frame.data[i] = color[0];
             frame.data[i + 1] = color[1];
@@ -460,10 +493,11 @@ function App() {
         const timeTaken = (performance.now() - startTime).toFixed(2);
         setRecolorTime(timeTaken);
 
-        // Manual mode fills each cluster with its mean. Automatic mode keeps
-        // the pixel's lightness and takes hue from the swatch. Full RGBXY
-        // additive layer decomposition is still a later step. The thumbnails
-        // are drawn from one full-size buffer, then stored small.
+        // Each swatch's own thumbnail stays flat so it reads as "this is the
+        // color," independent of whether the shading layer is on. The flat
+        // color is the same for every pixel in a cluster, so it's computed
+        // once per layer rather than per pixel. The thumbnails are drawn
+        // from one full-size buffer, then stored small.
         const preview = fitInside(width, height, LAYER_PREVIEW_MAX);
         const layerCanvas = document.createElement("canvas");
         layerCanvas.width = width;
@@ -476,12 +510,15 @@ function App() {
         if (!layerCtx || !thumbCtx) return;
         const layerUrls = [];
         for (let clusterIndex = 0; clusterIndex < centers.length; clusterIndex++) {
+            const center = centers[clusterIndex];
+            if (!center) {
+                layerUrls.push(null);
+                continue;
+            }
+            const color = flatChannels(center);
             const layerData = layerCtx.createImageData(width, height);
             for (let p = 0; p < ids.length; p++) {
                 if (ids[p] !== clusterIndex) continue;
-                const center = centers[clusterIndex];
-                if (!center) continue;
-                const color = paintedChannels(data, p, center, modeName);
                 const idx = p * 4;
                 layerData.data[idx] = color[0];
                 layerData.data[idx + 1] = color[1];
@@ -542,6 +579,7 @@ function App() {
             clusterIdsRef.current = null;
             setClusters([]);
             setOpaqueShares([]);
+            setClusterPositions([]);
             setLayerImages([]);
             return;
         }
@@ -551,7 +589,9 @@ function App() {
         setClusterCount(count);
         colorVisibleRef.current = centers.map(() => true);
         setColorVisible(colorVisibleRef.current);
-        setOpaqueShares(opaqueSharePercents(data, centers));
+        const stats = clusterStats(data, width, height, ids, centers);
+        setOpaqueShares(stats.shares);
+        setClusterPositions(stats.positions);
         console.log(
             "Manual k-means palette:",
             centers.map((c) => c.rgb)
@@ -574,6 +614,7 @@ function App() {
             setSamplePoints([]);
             setClusters([]);
             setOpaqueShares([]);
+            setClusterPositions([]);
             setLayerImages([]);
             setDeltaEStop(extracted.deltaEStop);
             return;
@@ -586,7 +627,9 @@ function App() {
         colorVisibleRef.current = centers.map(() => true);
         setColorVisible(colorVisibleRef.current);
         setDeltaEStop(extracted.deltaEStop);
-        setOpaqueShares(opaqueSharePercents(data, centers));
+        const stats = clusterStats(data, width, height, ids, centers);
+        setOpaqueShares(stats.shares);
+        setClusterPositions(stats.positions);
     };
 
     const runCurrent = (stored, nextMode, nextColor, nextSpatial, count) => {
@@ -595,9 +638,13 @@ function App() {
         else runAuto(stored, nextColor, nextSpatial);
     };
 
-    const handleImageUpload = (event) => {
-        const file = event.target.files[0];
+    const loadImageFile = (file) => {
         if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            setLoadError("이미지 파일만 올릴 수 있습니다.");
+            return;
+        }
+        setIsLoadingImage(true);
         const reader = new FileReader();
         reader.onload = (e) => {
             const img = new Image();
@@ -605,6 +652,7 @@ function App() {
                 try {
                     if (!img.width || !img.height) {
                         setLoadError("이미지를 읽지 못했습니다.");
+                        setIsLoadingImage(false);
                         return;
                     }
                     // One canvas, long side 2000. A camera original (often past
@@ -643,6 +691,13 @@ function App() {
                     setImageData(canvas.toDataURL());
                     setUploadId((id) => id + 1);
                     setLoadError(null);
+                    setImageInfo({
+                        name: file.name,
+                        size: file.size,
+                        type: file.type,
+                        width: img.width,
+                        height: img.height,
+                    });
                     runCurrent(
                         stored,
                         modeRef.current,
@@ -650,19 +705,37 @@ function App() {
                         spatialWeight,
                         manualCountRef.current
                     );
+                    setIsLoadingImage(false);
                 } catch (error) {
                     console.error(error);
                     setClusters([]);
                     setSamplePoints([]);
                     setLayerImages([]);
                     setLoadError("이미지를 처리하지 못했습니다.");
+                    setIsLoadingImage(false);
                 }
             };
-            img.onerror = () => setLoadError("이미지를 읽지 못했습니다.");
+            img.onerror = () => {
+                setLoadError("이미지를 읽지 못했습니다.");
+                setIsLoadingImage(false);
+            };
             img.src = e.target.result;
         };
-        reader.onerror = () => setLoadError("이미지를 읽지 못했습니다.");
+        reader.onerror = () => {
+            setLoadError("이미지를 읽지 못했습니다.");
+            setIsLoadingImage(false);
+        };
         reader.readAsDataURL(file);
+    };
+
+    const handleImageUpload = (event) => {
+        loadImageFile(event.target.files[0]);
+    };
+
+    const handleImageDrop = (event) => {
+        event.preventDefault();
+        setDragActive(false);
+        loadImageFile(event.dataTransfer.files[0]);
     };
 
     const switchMode = (nextMode) => {
@@ -692,8 +765,11 @@ function App() {
         const newClusters = [...clusters];
         newClusters[index] = { ...newClusters[index], rgb };
         setClusters(newClusters);
-        if (imageRef.current) {
-            setOpaqueShares(opaqueSharePercents(imageRef.current.data, newClusters));
+        if (imageRef.current && clusterIdsRef.current) {
+            const { data, width, height } = imageRef.current;
+            const stats = clusterStats(data, width, height, clusterIdsRef.current, newClusters);
+            setOpaqueShares(stats.shares);
+            setClusterPositions(stats.positions);
         }
 
         setIsUpdating(true);
@@ -702,7 +778,7 @@ function App() {
         }
         debounceTimeoutRef.current = setTimeout(() => {
             if (canvasRef.current && clusterIdsRef.current) {
-                updateCanvasAndLayers(newClusters, modeRef.current);
+                updateCanvasAndLayers(newClusters);
             }
             setIsUpdating(false);
         }, 300);
@@ -730,23 +806,36 @@ function App() {
         }
 
         if (!imageRef.current || !clusterIdsRef.current || !canvasRef.current) return;
-        if (modeRef.current === "manual") {
-            runManual(imageRef.current, nextCount, nextColor, nextSpatial);
-            return;
-        }
-        const { data, width, height } = imageRef.current;
-        assignLabIds(
-            data,
-            width,
-            height,
-            clusters,
-            nextColor,
-            nextSpatial,
-            clusterIdsRef.current,
-            false
-        );
-        setOpaqueShares(opaqueSharePercents(data, clusters));
-        updateCanvasAndLayers(clusters, "auto");
+
+        // Typing a digit or nudging a spinner fires this on every keystroke.
+        // The number inputs above already update instantly (setState calls
+        // run synchronously); only the expensive reclustering/reassignment
+        // waits for typing to pause, so the UI never feels blocked mid-type.
+        setIsUpdating(true);
+        clearTimeout(weightDebounceRef.current);
+        weightDebounceRef.current = setTimeout(() => {
+            if (modeRef.current === "manual") {
+                runManual(imageRef.current, nextCount, nextColor, nextSpatial);
+                setIsUpdating(false);
+                return;
+            }
+            const { data, width, height } = imageRef.current;
+            assignLabIds(
+                data,
+                width,
+                height,
+                clusters,
+                nextColor,
+                nextSpatial,
+                clusterIdsRef.current,
+                false
+            );
+            const stats = clusterStats(data, width, height, clusterIdsRef.current, clusters);
+            setOpaqueShares(stats.shares);
+            setClusterPositions(stats.positions);
+            updateCanvasAndLayers(clusters);
+            setIsUpdating(false);
+        }, 350);
     };
 
     const addColorFromImage = (event) => {
@@ -794,8 +883,10 @@ function App() {
         colorVisibleRef.current = nextVisible;
         setColorVisible(nextVisible);
         setClusters(next);
-        setOpaqueShares(opaqueSharePercents(stored.data, next));
-        updateCanvasAndLayers(next, modeRef.current);
+        const stats = clusterStats(stored.data, stored.width, stored.height, ids, next);
+        setOpaqueShares(stats.shares);
+        setClusterPositions(stats.positions);
+        updateCanvasAndLayers(next);
     };
 
     const setAllColorsVisible = (visible) => {
@@ -814,6 +905,7 @@ function App() {
 
     showOriginalRef.current = showOriginalLayer;
     showContourRef.current = showContourLayer;
+    shadingVisibleRef.current = shadingVisible;
     showLinesRef.current = showLines;
     lineArtVisibleRef.current = lineArtVisible;
     colorVisibleRef.current = colorVisible;
@@ -841,7 +933,7 @@ function App() {
             const cluster = ids[p];
             const center = centers[cluster];
             if (center && visibleColors[cluster] !== false) {
-                const color = paintedChannels(stored.data, p, center, modeRef.current);
+                const color = paintedChannels(stored.data, p, center, shadingVisibleRef.current);
                 frame.data[offset] = color[0];
                 frame.data[offset + 1] = color[1];
                 frame.data[offset + 2] = color[2];
@@ -946,11 +1038,11 @@ function App() {
 
     useEffect(() => {
         paintComposite();
-    }, [imageData, clusters, colorVisible, showOriginalLayer, showContourLayer, lineArtVisible, showLines, showInk, lineArtThumb, isUpdating]);
+    }, [imageData, clusters, colorVisible, showOriginalLayer, showContourLayer, shadingVisible, lineArtVisible, showLines, showInk, lineArtThumb, isUpdating]);
 
     useEffect(() => {
         if (!isUpdating && clusters.length > 0 && clusterIdsRef.current && canvasRef.current) {
-            updateCanvasAndLayers(clusters, modeRef.current);
+            updateCanvasAndLayers(clusters);
         }
     }, [clusters, isUpdating]);
 
@@ -963,141 +1055,218 @@ function App() {
                 minHeight: "100vh",
             }}
         >
-            <h1>컬러 팔레트 추출기</h1>
-            <div role="tablist" style={{ display: "flex", gap: "8px", margin: "10px" }}>
-                {[
-                    ["manual", "직접 설정"],
-                    ["auto", "자동 추출"],
-                ].map(([id, label]) => (
-                    <button
-                        key={id}
-                        type="button"
-                        role="tab"
-                        aria-selected={mode === id}
-                        onClick={() => switchMode(id)}
-                        style={{
-                            padding: "8px 16px",
-                            border: mode === id ? "2px solid #222" : "1px solid #bbb",
-                            background: mode === id ? "#222" : "#fff",
-                            color: mode === id ? "#fff" : "#222",
-                            cursor: "pointer",
-                        }}
-                    >
-                        {label}
-                    </button>
-                ))}
-            </div>
-            <input
-                type="file"
-                accept="image/*"
-                onChange={handleImageUpload}
-                ref={fileInputRef}
-                style={{ margin: "10px" }}
-            />
-            {loadError && <p>{loadError}</p>}
-            <div style={{ margin: "10px" }}>
-                <label>색상 가중치: </label>
-                <input
-                    type="number"
-                    value={colorWeight}
-                    onChange={(e) => handleWeightChange("color", e.target.value)}
-                    step="0.1"
-                    min="0"
-                />
-                <label> 공간 가중치: </label>
-                <input
-                    type="number"
-                    value={spatialWeight}
-                    onChange={(e) => handleWeightChange("spatial", e.target.value)}
-                    step="0.1"
-                    min="0"
-                />
-            </div>
-            <PreviewBoundary resetKey={uploadId}>
-            {clusters.length > 0 && (
-                <div className="palette-summary">
-                    <div style={{ fontSize: "22px", lineHeight: 1.2 }}>
-                        {clusters.length} swatches
-                    </div>
-                    {mode === "auto" && (
-                        <div style={{ marginTop: "4px", fontSize: "15px", color: "#505050" }}>
-                            stop ΔE {Math.round(deltaEStop)}
-                        </div>
-                    )}
-                    <div className="palette-share-bar" aria-hidden="true">
-                        {clusters
-                            .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
-                            .filter((item) => item.c?.rgb)
-                            .sort((a, b) => a.share - b.share || a.i - b.i)
-                            .map((item) => (
-                            <span
-                                key={`${mode}-share-${item.i}`}
-                                style={{
-                                    flex: `${shareWeight(item.share)} 1 0`,
-                                    background: rgbToHex(item.c.rgb),
-                                }}
+            <header className="app-header">
+                <h1>컬러 팔레트 추출기</h1>
+                {imageData && (
+                    <div className="header-toolbar">
+                        <button
+                            type="button"
+                            className="layer-toggle"
+                            aria-pressed={layersOpen}
+                            onClick={() => setLayersOpen((open) => !open)}
+                        >
+                            {layersOpen ? "레이어 숨기기" : "레이어"}
+                        </button>
+                        <label className="header-toolbar-check">
+                            <input
+                                type="checkbox"
+                                checked={showLines}
+                                onChange={(e) => setShowLines(e.target.checked)}
                             />
+                            {" 선 필터"}
+                        </label>
+                        <label className="header-toolbar-check">
+                            <input
+                                type="checkbox"
+                                checked={showInk}
+                                onChange={(e) => setShowInk(e.target.checked)}
+                            />
+                            {" 선화 추출"}
+                        </label>
+                        {inkNote && <span className="header-toolbar-note">{inkNote}</span>}
+                    </div>
+                )}
+            </header>
+            {loadError && <p>{loadError}</p>}
+            <PreviewBoundary resetKey={uploadId}>
+            <div className="workspace">
+                <aside className="panel panel-left">
+                    <div
+                        className={`drop-zone${dragActive ? " drop-zone-active" : ""}`}
+                        onDragOver={(e) => {
+                            e.preventDefault();
+                            setDragActive(true);
+                        }}
+                        onDragLeave={() => setDragActive(false)}
+                        onDrop={handleImageDrop}
+                    >
+                        {isLoadingImage ? (
+                            <>
+                                <span className="drop-zone-spinner" aria-hidden="true" />
+                                <span className="drop-zone-title">이미지를 불러오는 중</span>
+                            </>
+                        ) : (
+                            <>
+                                <svg className="drop-zone-icon" viewBox="0 0 24 24" width="32" height="32" aria-hidden="true">
+                                    <path
+                                        fill="currentColor"
+                                        d="M5 20q-.825 0-1.413-.588T3 18v-3h2v3h14v-3h2v3q0 .825-.588 1.413T19 20zm6-4V7.85l-2.6 2.6L7 9l5-5l5 5l-1.4 1.45l-2.6-2.6V16z"
+                                    />
+                                </svg>
+                                <span className="drop-zone-title">클릭하거나 이미지를 끌어다 놓으세요</span>
+                                <span className="drop-zone-hint">PNG · JPG · WEBP 등 이미지 파일</span>
+                            </>
+                        )}
+                        <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageUpload}
+                            ref={fileInputRef}
+                            disabled={isLoadingImage}
+                        />
+                    </div>
+                    <div role="tablist" className="mode-tabs">
+                        {[
+                            ["auto", "자동 추출"],
+                            ["manual", "직접 설정"],
+                        ].map(([id, label]) => (
+                            <button
+                                key={id}
+                                type="button"
+                                role="tab"
+                                aria-selected={mode === id}
+                                onClick={() => switchMode(id)}
+                                className={`mode-tab${mode === id ? " mode-tab-active" : ""}`}
+                            >
+                                {label}
+                            </button>
                         ))}
                     </div>
-                    {isUpdating && <p>색상 변경 중...</p>}
-                </div>
-            )}
-            <div className="stage">
-                <div className="canvas-and-swatches">
+                    {mode === "manual" && (
+                        <div className="settings-panel">
+                            <label>색상 가중치: </label>
+                            <input
+                                type="number"
+                                value={colorWeight}
+                                onChange={(e) => handleWeightChange("color", e.target.value)}
+                                step="0.1"
+                                min="0"
+                            />
+                            <label> 공간 가중치: </label>
+                            <input
+                                type="number"
+                                value={spatialWeight}
+                                onChange={(e) => handleWeightChange("spatial", e.target.value)}
+                                step="0.1"
+                                min="0"
+                            />
+                            <label> 클러스터 개수: </label>
+                            <input
+                                type="number"
+                                value={clusterCount}
+                                onChange={(e) => handleWeightChange("clusterCount", e.target.value)}
+                                step="1"
+                                min="1"
+                            />
+                        </div>
+                    )}
                     {imageData && (
-                        <div className="canvas-column">
-                            <div className="stage-toolbar">
-                                <button
-                                    type="button"
-                                    className="layer-toggle"
-                                    aria-pressed={layersOpen}
-                                    onClick={() => setLayersOpen((open) => !open)}
-                                >
-                                    {layersOpen ? "레이어 숨기기" : "레이어"}
-                                </button>
-                                <label>
-                                    <input
-                                        type="checkbox"
-                                        checked={showLines}
-                                        onChange={(e) => setShowLines(e.target.checked)}
-                                    />
-                                    {" 선 필터"}
-                                </label>
-                                <label>
-                                    <input
-                                        type="checkbox"
-                                        checked={showInk}
-                                        onChange={(e) => setShowInk(e.target.checked)}
-                                    />
-                                    {" 선화 추출"}
-                                </label>
-                                {inkNote && (
-                                    <span style={{ color: "#505050", fontSize: "14px" }}>{inkNote}</span>
-                                )}
+                        <div className="panel-image">
+                            <span className="image-frame-label">원본</span>
+                            <div className="image-with-dots">
+                                <img className="original-image checker-bg" src={imageData} alt="원본" />
+                                {clusters.map((c, i) => {
+                                    const pos = clusterPositions[i];
+                                    if (!c?.rgb || !pos) return null;
+                                    const hex = rgbToHex(c.rgb);
+                                    return (
+                                        <span
+                                            key={`${mode}-dot-${i}`}
+                                            className="swatch-dot"
+                                            style={{ left: `${pos.x * 100}%`, top: `${pos.y * 100}%`, background: hex }}
+                                            data-tooltip={`${hex} · ${(opaqueShares[i] ?? 0).toFixed(1)}%`}
+                                        />
+                                    );
+                                })}
                             </div>
+                            {imageInfo && (
+                                <div className="image-info">
+                                    <div>{imageInfo.width} × {imageInfo.height}px</div>
+                                    <div>
+                                        {formatBytes(imageInfo.size)}
+                                        {imageInfo.type ? ` · ${imageInfo.type.replace("image/", "").toUpperCase()}` : ""}
+                                    </div>
+                                    <div className="image-info-name">{imageInfo.name}</div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </aside>
+
+                <main className="panel panel-center">
+                    {!imageData && (
+                        <div className="panel-placeholder">이미지를 업로드하면 재색상 결과가 여기에 표시됩니다</div>
+                    )}
+                    {imageData && (
+                        <>
+                            {clusters.length > 0 && (
+                                <div className="palette-summary">
+                                    <div style={{ fontSize: "22px", lineHeight: 1.2 }}>
+                                        {clusters.length} swatches
+                                    </div>
+                                    {mode === "auto" && (
+                                        <div style={{ marginTop: "4px", fontSize: "15px", color: "#505050" }}>
+                                            stop ΔE {Math.round(deltaEStop)}
+                                        </div>
+                                    )}
+                                    <div className="palette-share-bar" aria-hidden="true">
+                                        {clusters
+                                            .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
+                                            .filter((item) => item.c?.rgb)
+                                            .sort((a, b) => a.share - b.share || a.i - b.i)
+                                            .map((item) => (
+                                            <span
+                                                key={`${mode}-share-${item.i}`}
+                                                style={{
+                                                    flex: `${shareWeight(item.share)} 1 0`,
+                                                    background: rgbToHex(item.c.rgb),
+                                                }}
+                                                data-tooltip={`${rgbToHex(item.c.rgb)} · ${item.share.toFixed(1)}%`}
+                                            />
+                                        ))}
+                                    </div>
+                                    {isUpdating && <p>색상 변경 중...</p>}
+                                </div>
+                            )}
                             <p style={{ margin: "0 0 8px", color: "#505050", fontSize: "14px" }}>
                                 미리보기를 클릭하면 그 색이 팔레트에 더해집니다.
                             </p>
-                            <div className="image-pair">
-                                <div className="image-frame">
-                                    <span className="image-frame-label">원본</span>
-                                    <img className="original-image checker-bg" src={imageData} alt="원본" />
-                                </div>
-                                <div className="image-frame">
-                                    <span className="image-frame-label">재색상</span>
-                                    <canvas
-                                        ref={previewCanvasRef}
-                                        className="stage-canvas checker-bg"
-                                        onClick={addColorFromImage}
-                                        aria-label="미리보기"
-                                    />
-                                </div>
+                            <div className="panel-image">
+                                <span className="image-frame-label">재색상</span>
+                                <canvas
+                                    ref={previewCanvasRef}
+                                    className="stage-canvas checker-bg"
+                                    onClick={addColorFromImage}
+                                    aria-label="미리보기"
+                                />
                             </div>
-                        </div>
+                        </>
                     )}
-                </div>
+                </main>
+
+                <div className="panel-right-col">
+                {layersOpen && !imageData && (
+                    <aside className="panel panel-right layer-dock" aria-label="레이어">
+                        <div className="layer-dock-header">
+                            <span className="layer-dock-title">레이어</span>
+                        </div>
+                        <div className="panel-placeholder panel-placeholder-dark">
+                            이미지를 업로드하면 색상 레이어가 여기에 표시됩니다
+                        </div>
+                    </aside>
+                )}
                 {layersOpen && imageData && (
-                    <aside className="layer-dock" aria-label="레이어">
+                    <aside className="panel panel-right layer-dock" aria-label="레이어">
                         <div className="layer-dock-header">
                             <span className="layer-dock-title">레이어</span>
                             {clusters.length > 0 && (
@@ -1139,6 +1308,19 @@ function App() {
                                 }}
                             />
                         </label>
+                        <label className="layer-row" data-hidden={shadingVisible ? "false" : "true"}>
+                            <span className="layer-thumb" />
+                            <span className="layer-name">
+                                음영
+                                <span className="layer-share">원본의 명암을 색상 위에 겹쳐 보여줍니다</span>
+                            </span>
+                            <input
+                                type="checkbox"
+                                checked={shadingVisible}
+                                aria-label="음영 표시"
+                                onChange={(e) => setShadingVisible(e.target.checked)}
+                            />
+                        </label>
                         {clusters
                             .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
                             .filter((item) => item.c?.rgb)
@@ -1148,24 +1330,27 @@ function App() {
                                 const shown = colorVisible[i] !== false;
                                 return (
                                     <label key={`${mode}-layer-${i}`} className="layer-row" data-hidden={shown ? "false" : "true"}>
-                                        <input
-                                            className="palette-swatch layer-swatch"
-                                            type="color"
-                                            value={hex}
-                                            aria-label={hex}
-                                            onChange={(e) => handleColorChange(i, e)}
-                                        />
+                                        {layerImages[i] ? <img src={layerImages[i]} alt="" /> : <span className="layer-thumb" />}
                                         <span className="layer-name">
-                                            <button
-                                                type="button"
-                                                className="layer-hex"
-                                                onClick={(e) => {
-                                                    e.preventDefault();
-                                                    copyToClipboard(hex);
-                                                }}
-                                            >
-                                                {copiedHex === hex ? "복사됨" : hex}
-                                            </button>
+                                            <span className="layer-name-top">
+                                                <input
+                                                    className="palette-swatch layer-dot"
+                                                    type="color"
+                                                    value={hex}
+                                                    aria-label={`${hex} 색상 수정`}
+                                                    onChange={(e) => handleColorChange(i, e)}
+                                                />
+                                                <button
+                                                    type="button"
+                                                    className="layer-hex"
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        copyToClipboard(hex);
+                                                    }}
+                                                >
+                                                    {copiedHex === hex ? "복사됨" : hex}
+                                                </button>
+                                            </span>
                                             <span className="layer-share">{share.toFixed(1)}% opaque</span>
                                         </span>
                                         <input
@@ -1200,24 +1385,15 @@ function App() {
                         </label>
                     </aside>
                 )}
-            </div>
-            {samplePoints.length > 0 && (
-                <div
-                    style={{
-                        width: "100%",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                    }}
-                >
-                    <p>재색상화 시간: {recolorTime}ms</p>
-                    <Scene
-                        points={samplePoints}
-                        clusters={clusters.filter((c) => c?.rgb).map((c) => c.rgb)}
-                        showConvexHull={showConvexHull}
-                    />
-                    <div style={{ margin: "10px" }}>
-                        <label style={{ marginLeft: "20px" }}>
+                {samplePoints.length > 0 && (
+                    <div className="scene-block">
+                        <p>재색상화 시간: {recolorTime}ms</p>
+                        <Scene
+                            points={samplePoints}
+                            clusters={clusters.filter((c) => c?.rgb).map((c) => c.rgb)}
+                            showConvexHull={showConvexHull}
+                        />
+                        <label className="scene-hull-toggle">
                             <input
                                 type="checkbox"
                                 checked={showConvexHull}
@@ -1226,18 +1402,8 @@ function App() {
                             Show Convex Hull
                         </label>
                     </div>
+                )}
                 </div>
-            )}
-            <div>
-                <label> 클러스터 개수: </label>
-                <input
-                    type="number"
-                    value={clusterCount}
-                    readOnly={mode === "auto"}
-                    onChange={(e) => handleWeightChange("clusterCount", e.target.value)}
-                    step="1"
-                    min="1"
-                />
             </div>
             </PreviewBoundary>
         </div>
