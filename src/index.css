@@ -325,6 +325,22 @@ body {
     align-items: stretch;
 }
 
+.stage-image-container {
+    position: relative;
+    display: inline-flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 6px;
+    margin: 0 auto;
+    max-width: 100%;
+}
+
+.stage-image-container .panel-image {
+    flex: 0 1 auto;
+    min-width: 0;
+    margin: 0;
+}
+
 .panel-placeholder {
     display: flex;
     align-items: center;
@@ -555,6 +571,14 @@ body {
     padding: 6px;
     border-radius: 8px;
     cursor: pointer;
+}
+
+.layer-num-badge {
+    flex: 0 0 16px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #8e8e93;
+    text-align: center;
 }
 
 .layer-row[data-hidden="true"] {

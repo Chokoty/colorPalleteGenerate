@@ -1395,19 +1395,24 @@ function App() {
                                 </button>
                             </div>
                             <div className={`center-stage${isLandscape ? "" : " center-stage-portrait"}`}>
-                                <div className="panel-image">
-                                    {centerTab === "recolor" ? (
+                                <div className="stage-image-container">
+                                    <div className="panel-image">
                                         <canvas
                                             ref={previewCanvasRef}
                                             className="stage-canvas checker-bg"
+                                            style={{ display: centerTab === "recolor" ? "block" : "none" }}
                                             onClick={addColorFromImage}
                                             aria-label="미리보기"
                                         />
-                                    ) : (
-                                        <img className="original-image checker-bg" src={imageData} alt="원본" />
-                                    )}
+                                        <img
+                                            className="original-image checker-bg"
+                                            src={imageData}
+                                            alt="원본"
+                                            style={{ display: centerTab === "original" ? "block" : "none" }}
+                                        />
+                                    </div>
+                                    {!isLandscape && clusters.length > 0 && renderShareBar("portrait-side", true)}
                                 </div>
-                                {!isLandscape && clusters.length > 0 && renderShareBar("portrait-side", true)}
                             </div>
                             {isLandscape && clusters.length > 0 && renderShareBar("bottom")}
                         </>
@@ -1550,13 +1555,14 @@ function App() {
                             .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
                             .filter((item) => item.c?.rgb)
                             .sort((a, b) => b.share - a.share || a.i - b.i)
-                            .map(({ c, i, share }) => {
+                            .map(({ c, i, share }, orderIndex) => {
                                 const hex = rgbToHex(c.rgb);
                                 const shown = colorVisible[i] !== false;
                                 const opacity = colorOpacity[i] ?? 100;
                                 return (
                                     <div key={`${mode}-layer-${i}`} className="layer-row-wrapper">
                                         <label className="layer-row" data-hidden={shown ? "false" : "true"}>
+                                            <span className="layer-num-badge">{orderIndex + 1}</span>
                                             {layerImages[i] ? <img src={layerImages[i]} alt="" /> : <span className="layer-thumb" />}
                                             <span className="layer-name">
                                                 <span className="layer-name-top">
