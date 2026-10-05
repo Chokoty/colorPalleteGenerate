@@ -1015,7 +1015,7 @@ function App() {
             .catch((error) => {
                 console.error(error);
                 if (request !== inkRequestRef.current) return;
-                setInkNote("선화를 추출하지 못했습니다");
+                setInkNote(`선화를 추출하지 못했습니다 (${error.message || error})`);
             });
     }, [showInk]);
 
@@ -1055,18 +1055,9 @@ function App() {
                 minHeight: "100vh",
             }}
         >
-            <header className="app-header">
-                <h1>컬러 팔레트 추출기</h1>
-                {imageData && (
+            {imageData && (
+                <header className="app-header">
                     <div className="header-toolbar">
-                        <button
-                            type="button"
-                            className="layer-toggle"
-                            aria-pressed={layersOpen}
-                            onClick={() => setLayersOpen((open) => !open)}
-                        >
-                            {layersOpen ? "레이어 숨기기" : "레이어"}
-                        </button>
                         <label className="header-toolbar-check">
                             <input
                                 type="checkbox"
@@ -1085,12 +1076,13 @@ function App() {
                         </label>
                         {inkNote && <span className="header-toolbar-note">{inkNote}</span>}
                     </div>
-                )}
-            </header>
+                </header>
+            )}
             {loadError && <p>{loadError}</p>}
             <PreviewBoundary resetKey={uploadId}>
             <div className="workspace">
                 <aside className="panel panel-left">
+                    <h1 className="panel-title">컬러 팔레트 추출기</h1>
                     <div
                         className={`drop-zone${dragActive ? " drop-zone-active" : ""}`}
                         onDragOver={(e) => {

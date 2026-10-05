@@ -314,21 +314,23 @@ body {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     gap: 12px;
     width: 100%;
     max-width: 1280px;
     box-sizing: border-box;
-    padding: 14px 20px;
-    margin: 16px auto 0;
+    padding: 12px 20px;
+    margin: 6px auto 0;
     background: #fff;
     border: 1px solid #e5e5e5;
     border-radius: 12px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
-.app-header h1 {
-    margin: 0;
+.panel-title {
+    margin: 0 0 12px;
+    font-size: 1.3rem;
+    line-height: 1.2;
 }
 
 .header-toolbar {
@@ -349,24 +351,6 @@ body {
 .header-toolbar-note {
     color: #bdbdbd;
     font-size: 14px;
-}
-
-.header-toolbar .layer-toggle {
-    background: #2c2c2e;
-}
-
-.header-toolbar .layer-toggle[aria-pressed="true"] {
-    background: #f2f2f2;
-    color: #1c1c1e;
-}
-
-.layer-toggle {
-    background: #1e1e1e;
-    color: #f2f2f2;
-    border: 1px solid #3a3a3a;
-    border-radius: 8px;
-    padding: 8px 12px;
-    cursor: pointer;
 }
 
 .checker-bg {
