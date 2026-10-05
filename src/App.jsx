@@ -434,6 +434,7 @@ function App() {
     const [shadingVisible, setShadingVisible] = useState(false);
     const [lineArtVisible, setLineArtVisible] = useState(true);
     const [colorVisible, setColorVisible] = useState([]);
+    const [originalClusters, setOriginalClusters] = useState([]);
     const [bgColor, setBgColor] = useState("#ffffff");
     const [bgVisible, setBgVisible] = useState(true);
     const [colorOpacity, setColorOpacity] = useState([]);
@@ -472,6 +473,7 @@ function App() {
     const contourOpacityRef = useRef(100);
     const shadingOpacityRef = useRef(100);
     const clustersRef = useRef([]);
+    const originalClustersRef = useRef([]);
     const clusterIdsRef = useRef(null);
     const manualSamplesRef = useRef(null);
     const manualCountRef = useRef(6);
@@ -597,6 +599,9 @@ function App() {
         const ids = idsFor(stored);
         assignRgbIds(data, width, height, centers, nextColor, nextSpatial, ids);
         setClusters(centers);
+        const orig = centers.map((c) => ({ ...c, rgb: [...c.rgb] }));
+        originalClustersRef.current = orig;
+        setOriginalClusters(orig);
         setClusterCount(count);
         colorVisibleRef.current = centers.map(() => true);
         setColorVisible(colorVisibleRef.current);
@@ -636,6 +641,9 @@ function App() {
         assignLabIds(data, width, height, centers, nextColor, nextSpatial, ids, true);
         setSamplePoints(viewSamples(extracted.uniqueColors));
         setClusters(centers);
+        const orig = centers.map((c) => ({ ...c, rgb: [...c.rgb] }));
+        originalClustersRef.current = orig;
+        setOriginalClusters(orig);
         setClusterCount(centers.length);
         colorVisibleRef.current = centers.map(() => true);
         setColorVisible(colorVisibleRef.current);
@@ -796,6 +804,39 @@ function App() {
             }
             setIsUpdating(false);
         }, 300);
+    };
+
+    const resetSingleColor = (index) => {
+        const orig = originalClustersRef.current;
+        if (!orig || !orig[index]) return;
+        const newClusters = [...clusters];
+        newClusters[index] = { ...newClusters[index], rgb: [...orig[index].rgb] };
+        setClusters(newClusters);
+        if (imageRef.current && clusterIdsRef.current) {
+            const { data, width, height } = imageRef.current;
+            const stats = clusterStats(data, width, height, clusterIdsRef.current, newClusters);
+            setOpaqueShares(stats.shares);
+            setClusterPositions(stats.positions);
+        }
+        if (canvasRef.current && clusterIdsRef.current) {
+            updateCanvasAndLayers(newClusters);
+        }
+    };
+
+    const resetAllColors = () => {
+        const orig = originalClustersRef.current;
+        if (!orig || orig.length === 0) return;
+        const newClusters = orig.map((c) => ({ ...c, rgb: [...c.rgb] }));
+        setClusters(newClusters);
+        if (imageRef.current && clusterIdsRef.current) {
+            const { data, width, height } = imageRef.current;
+            const stats = clusterStats(data, width, height, clusterIdsRef.current, newClusters);
+            setOpaqueShares(stats.shares);
+            setClusterPositions(stats.positions);
+        }
+        if (canvasRef.current && clusterIdsRef.current) {
+            updateCanvasAndLayers(newClusters);
+        }
     };
 
     const handleWeightChange = (type, value) => {
@@ -1435,6 +1476,20 @@ function App() {
                             <span className="layer-dock-title">레이어</span>
                             {clusters.length > 0 && (
                                 <div className="layer-dock-actions">
+                                    {originalClusters.length > 0 &&
+                                        clusters.some((c, idx) => {
+                                            const orig = originalClusters[idx];
+                                            if (!orig || !c) return false;
+                                            return (
+                                                Math.abs(c.rgb[0] - orig.rgb[0]) > 0.001 ||
+                                                Math.abs(c.rgb[1] - orig.rgb[1]) > 0.001 ||
+                                                Math.abs(c.rgb[2] - orig.rgb[2]) > 0.001
+                                            );
+                                        }) && (
+                                            <button type="button" className="layer-dock-reset-btn" onClick={resetAllColors} title="모든 색상 초기화">
+                                                색상 초기화
+                                            </button>
+                                        )}
                                     <button type="button" onClick={() => setAllColorsVisible(true)}>
                                         전체 선택
                                     </button>
@@ -1559,6 +1614,12 @@ function App() {
                                 const hex = rgbToHex(c.rgb);
                                 const shown = colorVisible[i] !== false;
                                 const opacity = colorOpacity[i] ?? 100;
+                                const orig = originalClusters[i];
+                                const isModified =
+                                    orig &&
+                                    (Math.abs(c.rgb[0] - orig.rgb[0]) > 0.001 ||
+                                        Math.abs(c.rgb[1] - orig.rgb[1]) > 0.001 ||
+                                        Math.abs(c.rgb[2] - orig.rgb[2]) > 0.001);
                                 return (
                                     <div key={`${mode}-layer-${i}`} className="layer-row-wrapper">
                                         <label className="layer-row" data-hidden={shown ? "false" : "true"}>
@@ -1583,6 +1644,19 @@ function App() {
                                                     >
                                                         {copiedHex === hex ? "복사됨" : hex}
                                                     </button>
+                                                    {isModified && (
+                                                        <button
+                                                            type="button"
+                                                            className="layer-reset-btn"
+                                                            title="원래 색상으로 초기화"
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                resetSingleColor(i);
+                                                            }}
+                                                        >
+                                                            ↺
+                                                        </button>
+                                                    )}
                                                 </span>
                                                 <span className="layer-share">{share.toFixed(1)}% · {opacity}%</span>
                                             </span>
