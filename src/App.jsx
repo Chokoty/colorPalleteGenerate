@@ -839,58 +839,47 @@ function App() {
         }
     };
 
-    const handleWeightChange = (type, value) => {
-        let nextColor = colorWeight;
-        let nextSpatial = spatialWeight;
+    const applySettings = () => {
+        if (!imageRef.current) return;
+        const nextColor = Number.parseFloat(colorWeight);
+        const validColor = Number.isFinite(nextColor) ? nextColor : 1.0;
+        const nextSpatial = Number.parseFloat(spatialWeight);
+        const validSpatial = Number.isFinite(nextSpatial) ? nextSpatial : 0.1;
+
         let nextCount = manualCountRef.current;
-        if (type === "color") {
-            nextColor = Number.parseFloat(value);
-            if (!Number.isFinite(nextColor)) return;
-            setColorWeight(nextColor);
-        } else if (type === "spatial") {
-            nextSpatial = Number.parseFloat(value);
-            if (!Number.isFinite(nextSpatial)) return;
-            setSpatialWeight(nextSpatial);
-        } else if (type === "clusterCount") {
-            if (modeRef.current !== "manual") return;
-            const parsed = Number.parseInt(value, 10);
-            if (!Number.isFinite(parsed)) return;
-            nextCount = Math.max(1, parsed);
+        if (modeRef.current === "manual") {
+            const parsedCount = Number.parseInt(clusterCount, 10);
+            nextCount = Number.isFinite(parsedCount) ? Math.max(1, parsedCount) : 6;
             manualCountRef.current = nextCount;
             setClusterCount(nextCount);
         }
 
-        if (!imageRef.current || !clusterIdsRef.current || !canvasRef.current) return;
-
-        // Typing a digit or nudging a spinner fires this on every keystroke.
-        // The number inputs above already update instantly (setState calls
-        // run synchronously); only the expensive reclustering/reassignment
-        // waits for typing to pause, so the UI never feels blocked mid-type.
         setIsUpdating(true);
-        clearTimeout(weightDebounceRef.current);
-        weightDebounceRef.current = setTimeout(() => {
+        setTimeout(() => {
             if (modeRef.current === "manual") {
-                runManual(imageRef.current, nextCount, nextColor, nextSpatial);
+                runManual(imageRef.current, nextCount, validColor, validSpatial);
                 setIsUpdating(false);
                 return;
             }
-            const { data, width, height } = imageRef.current;
-            assignLabIds(
-                data,
-                width,
-                height,
-                clusters,
-                nextColor,
-                nextSpatial,
-                clusterIdsRef.current,
-                false
-            );
-            const stats = clusterStats(data, width, height, clusterIdsRef.current, clusters);
-            setOpaqueShares(stats.shares);
-            setClusterPositions(stats.positions);
-            updateCanvasAndLayers(clusters);
+            if (clusterIdsRef.current && canvasRef.current) {
+                const { data, width, height } = imageRef.current;
+                assignLabIds(
+                    data,
+                    width,
+                    height,
+                    clusters,
+                    validColor,
+                    validSpatial,
+                    clusterIdsRef.current,
+                    false
+                );
+                const stats = clusterStats(data, width, height, clusterIdsRef.current, clusters);
+                setOpaqueShares(stats.shares);
+                setClusterPositions(stats.positions);
+                updateCanvasAndLayers(clusters);
+            }
             setIsUpdating(false);
-        }, 350);
+        }, 10);
     };
 
     const addColorFromImage = (event) => {
@@ -1301,32 +1290,45 @@ function App() {
                         ))}
                     </div>
                     {mode === "manual" && (
-                        <div className="settings-panel">
+                        <form
+                            className="settings-panel"
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                applySettings();
+                            }}
+                        >
                             <label>색상 가중치: </label>
                             <input
                                 type="number"
                                 value={colorWeight}
-                                onChange={(e) => handleWeightChange("color", e.target.value)}
+                                onChange={(e) => setColorWeight(e.target.value)}
                                 step="0.1"
                                 min="0"
                             />
-                            <label> 공간 가중치: </label>
+                            <label>공간 가중치: </label>
                             <input
                                 type="number"
                                 value={spatialWeight}
-                                onChange={(e) => handleWeightChange("spatial", e.target.value)}
+                                onChange={(e) => setSpatialWeight(e.target.value)}
                                 step="0.1"
                                 min="0"
                             />
-                            <label> 클러스터 개수: </label>
+                            <label>클러스터 개수: </label>
                             <input
                                 type="number"
                                 value={clusterCount}
-                                onChange={(e) => handleWeightChange("clusterCount", e.target.value)}
+                                onChange={(e) => setClusterCount(e.target.value)}
                                 step="1"
                                 min="1"
                             />
-                        </div>
+                            <button
+                                type="submit"
+                                className="settings-panel-apply-btn"
+                                disabled={isUpdating || isLoadingImage}
+                            >
+                                {isUpdating ? "적용 중..." : "적용"}
+                            </button>
+                        </form>
                     )}
                     {imageData && (
                         <div className="panel-image">
