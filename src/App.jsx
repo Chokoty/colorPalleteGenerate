@@ -428,7 +428,6 @@ function App() {
     const [showLines, setShowLines] = useState(false);
     const [showInk, setShowInk] = useState(false);
     const [inkNote, setInkNote] = useState("");
-    const [layersOpen, setLayersOpen] = useState(() => window.matchMedia("(min-width: 721px)").matches);
     const [dragActive, setDragActive] = useState(false);
     const [showContourLayer, setShowContourLayer] = useState(false);
     const [shadingVisible, setShadingVisible] = useState(false);
@@ -1462,7 +1461,7 @@ function App() {
                     )}
                 </main>
 
-                {layersOpen && !imageData && (
+                {!imageData && (
                     <aside className="panel panel-right layer-dock" aria-label="레이어">
                         <div className="layer-dock-header">
                             <span className="layer-dock-title">레이어</span>
@@ -1472,7 +1471,7 @@ function App() {
                         </div>
                     </aside>
                 )}
-                {layersOpen && imageData && (
+                {imageData && (
                     <aside className="panel panel-right layer-dock" aria-label="레이어">
                         <div className="layer-dock-header">
                             <span className="layer-dock-title">레이어</span>
