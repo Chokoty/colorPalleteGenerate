@@ -9,6 +9,8 @@ import {
 } from "./imagePalette";
 import { contourMask, dilate, gradientEdges } from "./imageOutline";
 import { extractLineArt } from "./lineartModel";
+import { StudyControls, StudyLayers, StudyStage } from "./ColorStudy";
+import { useColorStudy } from "./useColorStudy";
 
 // Main-branch extraction: the user picks k, and centers are k-means means
 // of sampled RGB+XY points. Recolor fills each pixel with its center.
@@ -477,6 +479,7 @@ function App() {
     const manualSamplesRef = useRef(null);
     const manualCountRef = useRef(6);
     const modeRef = useRef("auto");
+    const study = useColorStudy(imageRef, uploadId, mode === "study");
 
     const updateCanvasAndLayers = (centers) => {
         const stored = imageRef.current;
@@ -719,13 +722,15 @@ function App() {
                         width: img.width,
                         height: img.height,
                     });
-                    runCurrent(
-                        stored,
-                        modeRef.current,
-                        colorWeight,
-                        spatialWeight,
-                        manualCountRef.current
-                    );
+                    if (modeRef.current !== "study") {
+                        runCurrent(
+                            stored,
+                            modeRef.current,
+                            colorWeight,
+                            spatialWeight,
+                            manualCountRef.current
+                        );
+                    }
                     setIsLoadingImage(false);
                 } catch (error) {
                     console.error(error);
@@ -759,10 +764,23 @@ function App() {
         loadImageFile(event.dataTransfer.files[0]);
     };
 
+    const openStudySample = () => {
+        fetch("/samples/color-study.png")
+            .then((response) => {
+                if (!response.ok) throw new Error("sample");
+                return response.blob();
+            })
+            .then((blob) => {
+                loadImageFile(new File([blob], "color-study.png", { type: "image/png" }));
+            })
+            .catch(() => setLoadError("예시 이미지를 열지 못했습니다."));
+    };
+
     const switchMode = (nextMode) => {
         if (nextMode === modeRef.current) return;
         modeRef.current = nextMode;
         setMode(nextMode);
+        if (nextMode === "study") return;
         if (!imageRef.current) {
             setClusterCount(nextMode === "manual" ? manualCountRef.current : clusterCount);
             return;
@@ -1275,6 +1293,7 @@ function App() {
                         {[
                             ["auto", "자동 추출"],
                             ["manual", "직접 설정"],
+                            ["study", "채색 공부"],
                         ].map(([id, label]) => (
                             <button
                                 key={id}
@@ -1288,6 +1307,9 @@ function App() {
                             </button>
                         ))}
                     </div>
+                    {mode === "study" && (
+                        <StudyControls study={study} onOpenSample={openStudySample} />
+                    )}
                     {mode === "manual" && (
                         <form
                             className="settings-panel"
@@ -1329,7 +1351,7 @@ function App() {
                             </button>
                         </form>
                     )}
-                    {imageData && (
+                    {imageData && mode !== "study" && (
                         <div className="panel-image">
                             <span className="image-frame-label">원본</span>
                             <div className="image-with-dots">
@@ -1360,7 +1382,7 @@ function App() {
                             )}
                         </div>
                     )}
-                    {samplePoints.length > 0 && (
+                    {samplePoints.length > 0 && mode !== "study" && (
                         <div className="scene-block">
                             <p>재색상화 시간: {recolorTime}ms</p>
                             <Scene
@@ -1382,9 +1404,14 @@ function App() {
 
                 <main className="panel panel-center">
                     {!imageData && (
-                        <div className="panel-placeholder">이미지를 업로드하면 재색상 결과가 여기에 표시됩니다</div>
+                        <div className="panel-placeholder">
+                            {mode === "study"
+                                ? "이미지를 업로드하면 밑색, 빛, 그림자로 나눠 보여줍니다"
+                                : "이미지를 업로드하면 재색상 결과가 여기에 표시됩니다"}
+                        </div>
                     )}
-                    {imageData && (
+                    {imageData && mode === "study" && <StudyStage study={study} />}
+                    {imageData && mode !== "study" && (
                         <>
                             {clusters.length > 0 && (
                                 <div className="palette-summary">
@@ -1471,7 +1498,12 @@ function App() {
                         </div>
                     </aside>
                 )}
-                {imageData && (
+                {imageData && mode === "study" && (
+                    <aside className="panel panel-right layer-dock" aria-label="레이어">
+                        <StudyLayers study={study} />
+                    </aside>
+                )}
+                {imageData && mode !== "study" && (
                     <aside className="panel panel-right layer-dock" aria-label="레이어">
                         <div className="layer-dock-header">
                             <span className="layer-dock-title">레이어</span>
