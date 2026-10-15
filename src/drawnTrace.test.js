@@ -153,7 +153,20 @@ test("parseSvgPaths keeps the tracer d and fill", () => {
     const paths = parseSvgPaths(`<svg><path d="M0 0 C1 1 2 2 3 3 Z" fill="#ff00aa" transform="translate(0,0)"/></svg>`);
     assert.equal(paths.length, 1);
     assert.equal(paths[0].fill, "#ff00aa");
-    assert.match(paths[0].d, /C/);
+    assert.equal(paths[0].d, "M0 0 C1 1 2 2 3 3 Z");
+});
+
+test("parseSvgPaths keeps a vtracer shape at its translate", () => {
+    const local =
+        "M0 0 C4.95 0 9.9 0 15 0 C15 6.27 15 12.54 15 19 C10.05 19 5.1 19 0 19 C0 12.73 0 6.46 0 0 Z";
+    const paths = parseSvgPaths(
+        `<svg><path d="${local}" fill="#F0C828" transform="translate(41,9)"/></svg>`
+    );
+    assert.equal(paths.length, 1);
+    assert.equal(paths[0].fill, "#F0C828");
+    assert.match(paths[0].d, /^M41 9\b/);
+    assert.match(paths[0].d, /\b56 9\b/);
+    assert.doesNotMatch(paths[0].d, /^M0 0\b/);
 });
 
 test("vtracer spline stacked traces two colors as curves", async () => {
