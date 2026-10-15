@@ -493,6 +493,9 @@ function App() {
     const [svgReplay, setSvgReplay] = useState(false);
     const [layersOpen, setLayersOpen] = useState(true);
     const [studyOpen, setStudyOpen] = useState(true);
+    const [usingSample, setUsingSample] = useState(false);
+    const loadSerialRef = useRef(0);
+    const loadImageFileRef = useRef(null);
 
     const updateCanvasAndLayers = (centers) => {
         const stored = imageRef.current;
@@ -678,17 +681,19 @@ function App() {
         else runAuto(stored, nextColor, nextSpatial);
     };
 
-    const loadImageFile = (file) => {
+    const loadImageFile = (file, source = "upload") => {
         if (!file) return;
         if (!file.type.startsWith("image/")) {
             setLoadError("이미지 파일만 올릴 수 있습니다.");
             return;
         }
+        const serial = ++loadSerialRef.current;
         setIsLoadingImage(true);
         const reader = new FileReader();
         reader.onload = (e) => {
             const img = new Image();
             img.onload = () => {
+                if (serial !== loadSerialRef.current) return;
                 try {
                     if (!img.width || !img.height) {
                         setLoadError("이미지를 읽지 못했습니다.");
@@ -740,6 +745,7 @@ function App() {
                         width: img.width,
                         height: img.height,
                     });
+                    setUsingSample(source === "sample");
                     if (modeRef.current !== "study") {
                         runCurrent(
                             stored,
@@ -751,6 +757,7 @@ function App() {
                     }
                     setIsLoadingImage(false);
                 } catch (error) {
+                    if (serial !== loadSerialRef.current) return;
                     console.error(error);
                     setClusters([]);
                     setSamplePoints([]);
@@ -760,12 +767,14 @@ function App() {
                 }
             };
             img.onerror = () => {
+                if (serial !== loadSerialRef.current) return;
                 setLoadError("이미지를 읽지 못했습니다.");
                 setIsLoadingImage(false);
             };
             img.src = e.target.result;
         };
         reader.onerror = () => {
+            if (serial !== loadSerialRef.current) return;
             setLoadError("이미지를 읽지 못했습니다.");
             setIsLoadingImage(false);
         };
@@ -783,16 +792,36 @@ function App() {
     };
 
     const openStudySample = () => {
-        fetch("/samples/color-study.png")
+        fetch("/samples/default.webp")
             .then((response) => {
                 if (!response.ok) throw new Error("sample");
                 return response.blob();
             })
             .then((blob) => {
-                loadImageFile(new File([blob], "color-study.png", { type: "image/png" }));
+                loadImageFile(new File([blob], "default.webp", { type: "image/webp" }), "sample");
             })
             .catch(() => setLoadError("예시 이미지를 열지 못했습니다."));
     };
+    loadImageFileRef.current = loadImageFile;
+
+    useEffect(() => {
+        let cancelled = false;
+        fetch("/samples/default.webp")
+            .then((response) => {
+                if (!response.ok) throw new Error("sample");
+                return response.blob();
+            })
+            .then((blob) => {
+                if (cancelled) return;
+                loadImageFileRef.current(new File([blob], "default.webp", { type: "image/webp" }), "sample");
+            })
+            .catch(() => {
+                if (!cancelled) setLoadError("예시 이미지를 열지 못했습니다.");
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const switchMode = (nextMode) => {
         if (nextMode === "study") setStudyOpen(true);
@@ -1781,6 +1810,22 @@ function App() {
                                 onReplayActive={setSvgReplay}
                             />
                         </div>
+                    )}
+                    {usingSample && (
+                        <p className="sample-credit">
+                            Image by{" "}
+                            <a
+                                href="https://pixabay.com/users/qiaominxu_橋茗旭-18717949/"
+                                target="_blank"
+                                rel="noreferrer"
+                            >
+                                qiaominxu 橋茗旭
+                            </a>{" "}
+                            from{" "}
+                            <a href="https://pixabay.com/" target="_blank" rel="noreferrer">
+                                Pixabay
+                            </a>
+                        </p>
                     )}
                 </main>
 

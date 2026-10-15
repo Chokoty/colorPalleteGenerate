@@ -413,6 +413,19 @@ b {
     white-space: nowrap;
 }
 
+.sample-credit {
+    margin: 10px 0 0;
+    color: var(--ink-soft);
+    font-size: 11px;
+    letter-spacing: 0;
+    line-height: 1.45;
+    text-align: center;
+}
+
+.sample-credit a {
+    color: inherit;
+}
+
 .palette-summary {
     width: 100%;
     max-width: none;
