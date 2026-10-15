@@ -1,13 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import {
-    buildVectorLayers,
-    cloneTraceJob,
-    inkMaskFromRgba,
-    jobFromPalette,
-    jobFromStudy,
-    layersToSvg,
-    shouldUseWorker,
-} from "./svgTrace.js";
+import { constructionOpacity, drawnToSvg, TRACE_MAX_SIDE } from "./drawnTrace.js";
+import { inkMaskFromRgba } from "./svgTrace.js";
+import { downscaleRgba } from "./useColorStudy";
 import { ReplayChrome } from "./ui/ReplayChrome";
 import { strokeReplayStyle } from "./ui/strokeReplay";
 
@@ -29,17 +23,22 @@ function downloadText(filename, text) {
     URL.revokeObjectURL(url);
 }
 
-function traceWithWorker(job) {
-    return new Promise((resolve, reject) => {
-        const worker = new Worker(new URL("./svgTrace.worker.js", import.meta.url), { type: "module" });
-        const timer = setTimeout(() => {
+function traceWithWorker(job, onProgress) {
+    const worker = new Worker(new URL("./drawnTrace.worker.js", import.meta.url), { type: "module" });
+    let timer;
+    const promise = new Promise((resolve, reject) => {
+        timer = setTimeout(() => {
             worker.terminate();
             reject(new Error("trace timeout"));
-        }, 30000);
+        }, 120000);
         worker.onmessage = (event) => {
+            if (event.data?.type === "progress") {
+                onProgress?.(event.data);
+                return;
+            }
             clearTimeout(timer);
             worker.terminate();
-            if (!event.data?.ok) reject(new Error(event.data?.error || "trace failed"));
+            if (event.data?.type === "error") reject(new Error(event.data.error || "trace failed"));
             else resolve(event.data.result);
         };
         worker.onerror = (event) => {
@@ -47,24 +46,28 @@ function traceWithWorker(job) {
             worker.terminate();
             reject(new Error(event.message || "worker error"));
         };
-        const copy = cloneTraceJob(job);
-        copy.id = 1;
-        const transfers = [copy.labels.buffer];
-        if (copy.mass) transfers.push(copy.mass.buffer);
+        const copy = {
+            id: 1,
+            data: new Uint8ClampedArray(job.data),
+            width: job.width,
+            height: job.height,
+            detail: job.detail,
+            colorCount: job.colorCount,
+            ink: job.ink
+                ? { mask: new Uint8Array(job.ink.mask), width: job.ink.width, height: job.ink.height }
+                : null,
+        };
+        const transfers = [copy.data.buffer];
         if (copy.ink?.mask) transfers.push(copy.ink.mask.buffer);
         worker.postMessage(copy, transfers);
     });
-}
-
-async function runTrace(job) {
-    if (shouldUseWorker(job.width, job.height) && typeof Worker !== "undefined") {
-        try {
-            return await traceWithWorker(job);
-        } catch (error) {
-            console.warn(error);
-        }
-    }
-    return buildVectorLayers(job);
+    return {
+        promise,
+        stop() {
+            clearTimeout(timer);
+            worker.terminate();
+        },
+    };
 }
 
 export default function SvgPanel({
@@ -73,10 +76,6 @@ export default function SvgPanel({
     mode,
     image,
     fileName,
-    clusters,
-    clusterIds,
-    study,
-    overrides,
     ink,
     inkNote,
     includeInk,
@@ -91,25 +90,17 @@ export default function SvgPanel({
     const [speed, setSpeed] = useState(1);
     const [picture, setPicture] = useState(null);
     const [status, setStatus] = useState("idle");
+    const [progressTitle, setProgressTitle] = useState("");
     const [playing, setPlaying] = useState(false);
     const [shown, setShown] = useState(0);
     const [replayOpen, setReplayOpen] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
     const [reduceMotion, setReduceMotion] = useState(false);
-    const touched = useRef(false);
     const runId = useRef(0);
 
-    const available = mode === "study" ? study?.bases?.length || 0 : clusters?.length || 0;
-
     useEffect(() => {
-        touched.current = false;
-    }, [uploadId, mode]);
-
-    useEffect(() => {
-        if (!available) return;
-        if (!touched.current) setColorCount(Math.min(8, available));
-        else setColorCount((current) => Math.min(Math.max(1, current), available));
-    }, [available, uploadId, mode]);
+        setColorCount(8);
+    }, [uploadId]);
 
     useEffect(() => {
         setPicture(null);
@@ -118,7 +109,7 @@ export default function SvgPanel({
         setStatus("idle");
         setReplayOpen(false);
         setMenuOpen(false);
-    }, [uploadId, mode]);
+    }, [uploadId]);
 
     useEffect(() => {
         const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -158,47 +149,31 @@ export default function SvgPanel({
     useEffect(() => {
         if (!active || !image?.width) return undefined;
         let cancelled = false;
+        let run;
         const timer = setTimeout(() => {
             const inkMask = includeInk && ink ? inkMaskFromRgba(ink.rgba, ink.width, ink.height) : null;
-            let job = null;
-            if (mode === "study") {
-                if (!study?.bases?.length) {
-                    if (!cancelled) setStatus("wait");
-                    return;
-                }
-                job = jobFromStudy({
-                    analysis: study,
-                    overrides,
-                    colorCount,
-                    detail,
-                    ink: inkMask,
-                });
-            } else if (clusters?.length && clusterIds) {
-                job = jobFromPalette({
-                    data: image.data,
-                    width: image.width,
-                    height: image.height,
-                    ids: clusterIds,
-                    clusters,
-                    colorCount,
-                    detail,
-                    ink: inkMask,
-                });
-            }
-            if (!job?.colors?.length) {
-                if (!cancelled) {
-                    setPicture(null);
-                    setStatus(mode === "study" ? "wait" : "empty");
-                }
-                return;
-            }
+            const fitted = downscaleRgba(image.data, image.width, image.height, TRACE_MAX_SIDE);
             const id = ++runId.current;
             setStatus("tracing");
+            setProgressTitle("");
             const started = performance.now();
-            runTrace(job)
+            run = traceWithWorker(
+                {
+                    data: fitted.data,
+                    width: fitted.width,
+                    height: fitted.height,
+                    colorCount,
+                    detail,
+                    ink: inkMask,
+                },
+                (progress) => {
+                    if (!cancelled && id === runId.current) setProgressTitle(progress.title || "");
+                }
+            );
+            run.promise
                 .then((result) => {
                     if (cancelled || id !== runId.current) return;
-                    const doc = layersToSvg(result.layers, result.width, result.height);
+                    const doc = drawnToSvg(result);
                     setPicture({
                         ...result,
                         bytes: doc.bytes,
@@ -217,8 +192,9 @@ export default function SvgPanel({
         return () => {
             cancelled = true;
             clearTimeout(timer);
+            run?.stop();
         };
-    }, [active, image, uploadId, mode, detail, colorCount, clusters, clusterIds, study, overrides, ink, includeInk]);
+    }, [active, image, uploadId, detail, colorCount, ink, includeInk]);
 
     const fadeMs = Math.max(90, Math.round(420 / speed));
     const drawMs = Math.max(140, Math.round(980 / speed));
@@ -252,14 +228,10 @@ export default function SvgPanel({
     };
 
     const stem = (fileName || "palette").replace(/\.[^.]+$/, "") || "palette";
-    const count = Math.min(colorCount, Math.max(1, available || 1));
 
     const save = (animated) => {
         if (!picture) return;
-        const doc = layersToSvg(picture.layers, picture.width, picture.height, {
-            animated,
-            speed,
-        });
+        const doc = drawnToSvg(picture, { animated, speed });
         downloadText(animated ? `${stem}-animated.svg` : `${stem}.svg`, doc.svg);
     };
 
@@ -292,7 +264,7 @@ export default function SvgPanel({
                 const on = index < shown;
                 if (layer.kind === "stroke") {
                     return (
-                        <g key={layer.id} opacity={on ? 1 : 0}>
+                        <g key={layer.id} data-title={layer.title || layer.name} opacity={on ? 1 : 0}>
                             {layer.d.map((d, pathIndex) => (
                                 <path
                                     key={`${layer.id}-${pathIndex}`}
@@ -307,17 +279,20 @@ export default function SvgPanel({
                         </g>
                     );
                 }
+                const opacity = on ? constructionOpacity(index, shown) : 0;
                 return (
-                    <path
+                    <g
                         key={layer.id}
-                        d={layer.d}
-                        fill={layer.hex}
-                        fillRule="evenodd"
+                        data-title={layer.title || layer.name}
+                        opacity={layer.role === "construction" ? opacity : on ? 1 : 0}
                         style={{
-                            opacity: on ? 1 : 0,
                             transition: on && !reduceMotion ? `opacity ${fadeMs}ms ease` : "none",
                         }}
-                    />
+                    >
+                        {layer.paths.map((path, pathIndex) => (
+                            <path key={`${layer.id}-${pathIndex}`} d={path.d} fill={path.fill} fillRule="evenodd" />
+                        ))}
+                    </g>
                 );
             })}
         </svg>
@@ -326,7 +301,9 @@ export default function SvgPanel({
             {status === "error"
                 ? "SVG로 만들지 못했습니다."
                 : status === "tracing" || status === "wait"
-                  ? "벡터로 만드는 중"
+                  ? progressTitle
+                      ? `벡터로 만드는 중 · ${progressTitle}`
+                      : "벡터로 만드는 중"
                   : "색이 준비되면 여기에 SVG가 나타납니다."}
         </div>
     );
@@ -339,14 +316,9 @@ export default function SvgPanel({
                         채색
                     </button>
                 ) : (
-                    <>
-                        <button type="button" role="tab" className="mode-tab" onClick={() => leave("recolor")}>
-                            재색상
-                        </button>
-                        <button type="button" role="tab" className="mode-tab" onClick={() => leave("original")}>
-                            원본
-                        </button>
-                    </>
+                    <button type="button" role="tab" className="mode-tab" onClick={() => leave("recolor")}>
+                        재색상
+                    </button>
                 )}
                 <button type="button" role="tab" className="mode-tab mode-tab-active" aria-selected="true">
                     SVG
@@ -365,18 +337,14 @@ export default function SvgPanel({
                     />
                 </label>
                 <label>
-                    색 수 {available ? count : 0}
+                    색 수 {colorCount}
                     <input
                         type="range"
-                        min="1"
-                        max={Math.max(1, available)}
-                        value={count}
+                        min="3"
+                        max="8"
+                        value={colorCount}
                         aria-label="색 수"
-                        disabled={!available}
-                        onChange={(event) => {
-                            touched.current = true;
-                            setColorCount(Number(event.target.value));
-                        }}
+                        onChange={(event) => setColorCount(Number(event.target.value))}
                     />
                 </label>
                 <button
@@ -389,7 +357,8 @@ export default function SvgPanel({
                 </button>
             </div>
             <p className="svg-note">
-                큰 밑색, 그림자, 빛, 작은 디테일, 선화 순으로 쌓습니다. 디테일은 경로를 단순하게 하고 작은 덩어리를 걷어냅니다.
+                원본을 매끈하게 정리한 뒤 구도, 큰 색면, 오차를 줄이는 조각, 남은 점 순으로 쌓습니다. 앞의 두 선은 마지막에
+                사라집니다.
                 {inkNote ? ` ${inkNote}` : ""}
             </p>
             <div className="svg-transport">
@@ -421,6 +390,11 @@ export default function SvgPanel({
                 <span>경로 {picture?.pathCount ?? 0}</span>
                 <span>{picture ? formatBytes(picture.bytes) : "—"}</span>
                 {picture?.ms != null && <span>{picture.ms}ms</span>}
+                {picture?.batches?.length ? (
+                    <span>
+                        MAE {picture.batches.at(-1).mae.toFixed(2)} · {picture.batches.at(-1).psnr.toFixed(1)} dB
+                    </span>
+                ) : null}
             </div>
             <div className="svg-layer-heading">그리는 순서</div>
             <ol className="svg-layer-list" aria-label="SVG 레이어">
@@ -436,6 +410,7 @@ export default function SvgPanel({
                             <strong>{layer.name}</strong>
                             <em>
                                 {layer.kind === "stroke" ? "획" : "면"} · {layer.paths.length}
+                                {layer.mae != null ? ` · MAE ${layer.mae.toFixed(2)} · ${layer.psnr.toFixed(1)} dB` : ""}
                             </em>
                         </span>
                     </li>
@@ -480,7 +455,9 @@ export default function SvgPanel({
                     <div className="device-stage">
                         <div className="device-frame svg-stage">
                             {drawing}
-                            {status === "tracing" && picture && <div className="svg-busy">벡터로 만드는 중</div>}
+                            {status === "tracing" && picture && (
+                            <div className="svg-busy">{progressTitle ? progressTitle : "벡터로 만드는 중"}</div>
+                        )}
                         </div>
                     </div>
                     {!replayOpen && <div className="device-controls">{controls}</div>}

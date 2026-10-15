@@ -52,7 +52,10 @@ export default defineConfig({
         },
     },
     optimizeDeps: {
-        exclude: ["onnxruntime-web"],
+        exclude: ["onnxruntime-web", "vtracer-wasm"],
+    },
+    worker: {
+        format: "es",
     },
     server: {
         headers: crossOriginIsolation,
