@@ -1381,8 +1381,7 @@ function App() {
         </div>
     );
 
-    const drawLabel =
-        centerTab === "svg" ? "SVG" : mode === "study" ? "STUDY" : centerTab === "original" ? "ORIGINAL" : "PALETTE";
+    const drawLabel = centerTab === "svg" ? "SVG" : mode === "study" ? "STUDY" : "PALETTE";
     const drawTime =
         mode === "study"
             ? study.analysis
@@ -1463,26 +1462,15 @@ function App() {
                     채색
                 </button>
             ) : (
-                <>
-                    <button
-                        type="button"
-                        role="tab"
-                        aria-selected={centerTab === "recolor"}
-                        className={`mode-tab${centerTab === "recolor" ? " mode-tab-active" : ""}`}
-                        onClick={() => openCenter("recolor")}
-                    >
-                        재색상
-                    </button>
-                    <button
-                        type="button"
-                        role="tab"
-                        aria-selected={centerTab === "original"}
-                        className={`mode-tab${centerTab === "original" ? " mode-tab-active" : ""}`}
-                        onClick={() => openCenter("original")}
-                    >
-                        원본
-                    </button>
-                </>
+                <button
+                    type="button"
+                    role="tab"
+                    aria-selected={centerTab === "recolor"}
+                    className={`mode-tab${centerTab === "recolor" ? " mode-tab-active" : ""}`}
+                    onClick={() => openCenter("recolor")}
+                >
+                    재색상
+                </button>
             )}
             <button
                 type="button"
@@ -1589,47 +1577,6 @@ function App() {
                     {mode === "study" && (
                         <StudyControls study={study} onOpenSample={openStudySample} />
                     )}
-                    {mode === "manual" && (
-                        <form
-                            className="settings-panel"
-                            onSubmit={(e) => {
-                                e.preventDefault();
-                                applySettings();
-                            }}
-                        >
-                            <label>색상 가중치: </label>
-                            <input
-                                type="number"
-                                value={colorWeight}
-                                onChange={(e) => setColorWeight(e.target.value)}
-                                step="0.1"
-                                min="0"
-                            />
-                            <label>공간 가중치: </label>
-                            <input
-                                type="number"
-                                value={spatialWeight}
-                                onChange={(e) => setSpatialWeight(e.target.value)}
-                                step="0.1"
-                                min="0"
-                            />
-                            <label>클러스터 개수: </label>
-                            <input
-                                type="number"
-                                value={clusterCount}
-                                onChange={(e) => setClusterCount(e.target.value)}
-                                step="1"
-                                min="1"
-                            />
-                            <button
-                                type="submit"
-                                className="settings-panel-apply-btn"
-                                disabled={isUpdating || isLoadingImage}
-                            >
-                                {isUpdating ? "적용 중..." : "적용"}
-                            </button>
-                        </form>
-                    )}
                     {imageData && mode !== "study" && (
                         <div className="panel-image">
                             <div className="button-row">
@@ -1695,7 +1642,8 @@ function App() {
                         </div>
                     )}
                     {samplePoints.length > 0 && mode !== "study" && (
-                        <div className="scene-block">
+                        <details className="scene-block">
+                            <summary>색 분포</summary>
                             <p>재색상화 시간: {recolorTime}ms</p>
                             <Scene
                                 points={samplePoints}
@@ -1710,7 +1658,48 @@ function App() {
                                 />
                                 Show Convex Hull
                             </label>
-                        </div>
+                        </details>
+                    )}
+                    {mode === "manual" && (
+                        <form
+                            className="settings-panel"
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                applySettings();
+                            }}
+                        >
+                            <label>색상 가중치: </label>
+                            <input
+                                type="number"
+                                value={colorWeight}
+                                onChange={(e) => setColorWeight(e.target.value)}
+                                step="0.1"
+                                min="0"
+                            />
+                            <label>공간 가중치: </label>
+                            <input
+                                type="number"
+                                value={spatialWeight}
+                                onChange={(e) => setSpatialWeight(e.target.value)}
+                                step="0.1"
+                                min="0"
+                            />
+                            <label>클러스터 개수: </label>
+                            <input
+                                type="number"
+                                value={clusterCount}
+                                onChange={(e) => setClusterCount(e.target.value)}
+                                step="1"
+                                min="1"
+                            />
+                            <button
+                                type="submit"
+                                className="settings-panel-apply-btn"
+                                disabled={isUpdating || isLoadingImage}
+                            >
+                                {isUpdating ? "적용 중..." : "적용"}
+                            </button>
+                        </form>
                     )}
                 </aside>
 
@@ -1761,14 +1750,7 @@ function App() {
                                                         <canvas
                                                             ref={previewCanvasRef}
                                                             className="stage-canvas checker-bg"
-                                                            style={{ display: centerTab === "recolor" ? "block" : "none" }}
                                                             aria-label="미리보기"
-                                                        />
-                                                        <img
-                                                            className="original-image checker-bg"
-                                                            src={imageData}
-                                                            alt="원본"
-                                                            style={{ display: centerTab === "original" ? "block" : "none" }}
                                                         />
                                                     </div>
                                                     {!isLandscape && clusters.length > 0 && renderShareBar("portrait-side", true)}

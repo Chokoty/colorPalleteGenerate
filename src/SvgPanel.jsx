@@ -343,14 +343,9 @@ export default function SvgPanel({
                         채색
                     </button>
                 ) : (
-                    <>
-                        <button type="button" role="tab" className="mode-tab" onClick={() => leave("recolor")}>
-                            재색상
-                        </button>
-                        <button type="button" role="tab" className="mode-tab" onClick={() => leave("original")}>
-                            원본
-                        </button>
-                    </>
+                    <button type="button" role="tab" className="mode-tab" onClick={() => leave("recolor")}>
+                        재색상
+                    </button>
                 )}
                 <button type="button" role="tab" className="mode-tab mode-tab-active" aria-selected="true">
                     SVG

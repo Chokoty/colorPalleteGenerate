@@ -133,8 +133,8 @@ button {
 }
 
 .panel-left {
-    flex: 0 0 272px;
-    width: 272px;
+    flex: 0 0 340px;
+    width: 340px;
     border: 1px solid var(--line);
     padding: 16px;
     background: var(--paper);
@@ -736,6 +736,14 @@ input[type="checkbox"] {
     align-items: stretch;
     gap: 8px;
     margin-top: 16px;
+}
+
+.scene-block > summary {
+    cursor: pointer;
+    color: var(--ink);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
 }
 
 .scene-block > div {
