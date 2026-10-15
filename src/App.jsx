@@ -1620,10 +1620,6 @@ function App() {
                                 mode={mode}
                                 image={imageRef.current}
                                 fileName={imageInfo?.name}
-                                clusters={clusters}
-                                clusterIds={clusterIdsRef.current}
-                                study={study.analysis}
-                                overrides={study.overrides}
                                 ink={showInk ? inkCacheRef.current?.art : null}
                                 inkNote={inkNote}
                                 includeInk={showInk}

@@ -1,3 +1,5 @@
+import { analyzeColorStudy } from "./colorStudy.js";
+
 // In-browser image-to-SVG. No server, no model, no OpenCV.
 // Filled regions become simplified polygons (pixel-corner contours +
 // Ramer–Douglas–Peucker). Line art is thinned to a centerline and stored
@@ -1010,6 +1012,24 @@ export function jobFromPalette({ data, width, height, ids, clusters, colorCount,
         detailArea,
         maxSide,
     };
+}
+
+export function jobFromOriginal({ data, width, height, colorCount, detail, ink }) {
+    const requested = Number(colorCount);
+    const baseCount = Math.max(3, Math.min(8, Math.round(Number.isFinite(requested) ? requested : 8)));
+    const analysis = analyzeColorStudy(data, width, height, {
+        baseCount,
+        levels: 3,
+        threshold: 0.06,
+        smoothRadius: 5,
+    });
+    return jobFromStudy({
+        analysis,
+        overrides: null,
+        colorCount: baseCount,
+        detail,
+        ink,
+    });
 }
 
 export function jobFromStudy({ analysis, overrides, colorCount, detail, ink, epsilon, minArea, detailArea, maxSide }) {

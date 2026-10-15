@@ -3,11 +3,45 @@ import {
     buildVectorLayers,
     cloneTraceJob,
     inkMaskFromRgba,
-    jobFromPalette,
-    jobFromStudy,
+    jobFromOriginal,
     layersToSvg,
     shouldUseWorker,
 } from "./svgTrace.js";
+
+const STUDY_ANALYSIS_SIDE = 640;
+
+function fitStudySide(width, height, maxSide) {
+    if (width <= maxSide && height <= maxSide) return { width, height };
+    const aspect = width / height;
+    if (width > height) {
+        return { width: maxSide, height: Math.max(1, Math.round(maxSide / aspect)) };
+    }
+    return { width: Math.max(1, Math.round(maxSide * aspect)), height: maxSide };
+}
+
+// 640 is the study analysis size. Full-frame k-means would block the page.
+function downscaleForTrace(data, width, height) {
+    const fitted = fitStudySide(width, height, STUDY_ANALYSIS_SIDE);
+    if (fitted.width === width && fitted.height === height) {
+        return { data, width, height };
+    }
+    const src = document.createElement("canvas");
+    src.width = width;
+    src.height = height;
+    src.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(data), width, height), 0, 0);
+    const dst = document.createElement("canvas");
+    dst.width = fitted.width;
+    dst.height = fitted.height;
+    const ctx = dst.getContext("2d", { willReadFrequently: true });
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(src, 0, 0, fitted.width, fitted.height);
+    return {
+        data: ctx.getImageData(0, 0, fitted.width, fitted.height).data,
+        width: fitted.width,
+        height: fitted.height,
+    };
+}
 import { ReplayChrome } from "./ui/ReplayChrome";
 import { strokeReplayStyle } from "./ui/strokeReplay";
 
@@ -73,10 +107,6 @@ export default function SvgPanel({
     mode,
     image,
     fileName,
-    clusters,
-    clusterIds,
-    study,
-    overrides,
     ink,
     inkNote,
     includeInk,
@@ -96,20 +126,11 @@ export default function SvgPanel({
     const [replayOpen, setReplayOpen] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
     const [reduceMotion, setReduceMotion] = useState(false);
-    const touched = useRef(false);
     const runId = useRef(0);
 
-    const available = mode === "study" ? study?.bases?.length || 0 : clusters?.length || 0;
-
     useEffect(() => {
-        touched.current = false;
-    }, [uploadId, mode]);
-
-    useEffect(() => {
-        if (!available) return;
-        if (!touched.current) setColorCount(Math.min(8, available));
-        else setColorCount((current) => Math.min(Math.max(1, current), available));
-    }, [available, uploadId, mode]);
+        setColorCount(8);
+    }, [uploadId]);
 
     useEffect(() => {
         setPicture(null);
@@ -118,7 +139,7 @@ export default function SvgPanel({
         setStatus("idle");
         setReplayOpen(false);
         setMenuOpen(false);
-    }, [uploadId, mode]);
+    }, [uploadId]);
 
     useEffect(() => {
         const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -160,35 +181,19 @@ export default function SvgPanel({
         let cancelled = false;
         const timer = setTimeout(() => {
             const inkMask = includeInk && ink ? inkMaskFromRgba(ink.rgba, ink.width, ink.height) : null;
-            let job = null;
-            if (mode === "study") {
-                if (!study?.bases?.length) {
-                    if (!cancelled) setStatus("wait");
-                    return;
-                }
-                job = jobFromStudy({
-                    analysis: study,
-                    overrides,
-                    colorCount,
-                    detail,
-                    ink: inkMask,
-                });
-            } else if (clusters?.length && clusterIds) {
-                job = jobFromPalette({
-                    data: image.data,
-                    width: image.width,
-                    height: image.height,
-                    ids: clusterIds,
-                    clusters,
-                    colorCount,
-                    detail,
-                    ink: inkMask,
-                });
-            }
+            const fitted = downscaleForTrace(image.data, image.width, image.height);
+            const job = jobFromOriginal({
+                data: fitted.data,
+                width: fitted.width,
+                height: fitted.height,
+                colorCount,
+                detail,
+                ink: inkMask,
+            });
             if (!job?.colors?.length) {
                 if (!cancelled) {
                     setPicture(null);
-                    setStatus(mode === "study" ? "wait" : "empty");
+                    setStatus("empty");
                 }
                 return;
             }
@@ -218,7 +223,7 @@ export default function SvgPanel({
             cancelled = true;
             clearTimeout(timer);
         };
-    }, [active, image, uploadId, mode, detail, colorCount, clusters, clusterIds, study, overrides, ink, includeInk]);
+    }, [active, image, uploadId, detail, colorCount, ink, includeInk]);
 
     const fadeMs = Math.max(90, Math.round(420 / speed));
     const drawMs = Math.max(140, Math.round(980 / speed));
@@ -252,7 +257,6 @@ export default function SvgPanel({
     };
 
     const stem = (fileName || "palette").replace(/\.[^.]+$/, "") || "palette";
-    const count = Math.min(colorCount, Math.max(1, available || 1));
 
     const save = (animated) => {
         if (!picture) return;
@@ -365,18 +369,14 @@ export default function SvgPanel({
                     />
                 </label>
                 <label>
-                    색 수 {available ? count : 0}
+                    색 수 {colorCount}
                     <input
                         type="range"
-                        min="1"
-                        max={Math.max(1, available)}
-                        value={count}
+                        min="3"
+                        max="8"
+                        value={colorCount}
                         aria-label="색 수"
-                        disabled={!available}
-                        onChange={(event) => {
-                            touched.current = true;
-                            setColorCount(Number(event.target.value));
-                        }}
+                        onChange={(event) => setColorCount(Number(event.target.value))}
                     />
                 </label>
                 <button
