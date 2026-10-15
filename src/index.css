@@ -582,6 +582,57 @@ b {
     border: none;
 }
 
+.panel-placeholder:has(.start-guide) {
+    display: block;
+    min-height: 0;
+    padding: 18px 16px 16px;
+    text-align: left;
+    letter-spacing: 0;
+    color: var(--ink);
+}
+
+.start-guide {
+    margin: 0;
+}
+
+.start-guide-lead {
+    margin: 0 0 10px;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.start-guide svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.start-guide-labels {
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+}
+
+.start-guide-steps {
+    margin: 12px 0 0;
+    padding-left: 1.2em;
+    font-size: 12px;
+    line-height: 1.45;
+    letter-spacing: 0;
+}
+
+.start-guide-steps li + li {
+    margin-top: 4px;
+}
+
+.start-guide-note {
+    margin: 10px 0 0;
+    color: var(--ink-soft);
+    font-size: 12px;
+    line-height: 1.45;
+    letter-spacing: 0;
+}
+
 .panel-placeholder-dark {
     min-height: 120px;
     min-width: 0;
@@ -717,17 +768,160 @@ input[type="checkbox"] {
     text-align: center;
 }
 
-.layer-dock {
+.panel-right {
     flex: 0 0 272px;
     width: 272px;
-    max-height: min(78vh, 760px);
-    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    max-height: min(88vh, 900px);
+    min-width: 0;
+}
+
+.layer-dock,
+.study-dock {
+    width: 100%;
+    margin: 0;
     box-sizing: border-box;
     background: var(--paper);
     color: var(--ink);
     border: 1px solid var(--ink);
     border-radius: 0;
-    padding: 8px;
+    padding: 0;
+}
+
+.layer-dock:not([open]) > :not(summary),
+.study-dock:not([open]) > :not(summary) {
+    display: none;
+}
+
+.layer-dock[open] {
+    overflow: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: min(58vh, 640px);
+}
+
+.study-dock[open] {
+    overflow: auto;
+    max-height: min(46vh, 520px);
+}
+
+.dock-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    list-style: none;
+    position: sticky;
+    top: 0;
+    background: var(--paper);
+    z-index: 1;
+}
+
+.dock-summary::-webkit-details-marker {
+    display: none;
+}
+
+.dock-summary::marker {
+    content: "";
+}
+
+.dock-summary::after {
+    content: "";
+    flex: 0 0 8px;
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid var(--ink);
+    border-bottom: 2px solid var(--ink);
+    transform: rotate(45deg);
+    margin-top: -4px;
+}
+
+.layer-dock[open] > .dock-summary::after,
+.study-dock[open] > .dock-summary::after {
+    transform: rotate(-135deg);
+    margin-top: 2px;
+}
+
+.dock-summary-hint {
+    flex: 1 1 auto;
+    text-align: right;
+    font-size: 11px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--ink-soft);
+    line-height: 1.35;
+}
+
+.dock-body {
+    padding: 0 8px 8px;
+}
+
+.study-entry {
+    width: 100%;
+}
+
+.dock-aside-note {
+    margin: -2px 2px 0;
+    color: var(--ink-soft);
+    font-size: 12px;
+    line-height: 1.4;
+    letter-spacing: 0;
+}
+
+.study-dock .study-controls {
+    margin-top: 0;
+    padding: 0 12px 12px;
+}
+
+.study-dock .study-tool-row .mode-tab {
+    flex: 1 1 30%;
+    padding: 8px 4px;
+    text-align: center;
+}
+
+.study-steps {
+    margin: 0 0 4px;
+    padding: 0 0 0 1.15em;
+    font-size: 12px;
+    line-height: 1.45;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--ink);
+}
+
+.study-steps li + li {
+    margin-top: 6px;
+}
+
+.study-more {
+    border-top: 1px solid var(--ink-faint);
+    margin-top: 4px;
+    padding-top: 8px;
+}
+
+.study-more:not([open]) > :not(summary) {
+    display: none;
+}
+
+.study-more > summary {
+    cursor: pointer;
+    list-style: none;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.study-more > summary::-webkit-details-marker {
+    display: none;
+}
+
+.study-more > summary::marker {
+    content: "";
 }
 
 .scene-block {
@@ -779,6 +973,7 @@ input[type="checkbox"] {
     flex-wrap: wrap;
     gap: 6px;
     justify-content: flex-end;
+    margin-left: auto;
     padding-bottom: var(--press);
 }
 
@@ -1326,7 +1521,7 @@ input[type="checkbox"] {
     }
 
     .panel-left,
-    .panel-right.layer-dock,
+    .panel-right,
     .panel-center {
         width: 100%;
         flex-basis: auto;
@@ -1349,8 +1544,13 @@ input[type="checkbox"] {
         flex-direction: column;
     }
 
-    .panel-right.layer-dock {
-        max-height: min(60vh, 420px);
+    .panel-right {
+        max-height: none;
+    }
+
+    .layer-dock[open],
+    .study-dock[open] {
+        max-height: min(52vh, 420px);
     }
 
     .stage-canvas,

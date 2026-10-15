@@ -16,6 +16,12 @@ function bitmapPoint(event, canvas, width, height) {
 export function StudyControls({ study, onOpenSample }) {
     return (
         <div className="study-controls">
+            <ol className="study-steps">
+                <li>예시 일러스트를 열거나, 왼쪽에서 그림을 올립니다.</li>
+                <li>스포이드로 그림의 밝은 부분을 집으면 그 색이 빛 색이 됩니다.</li>
+                <li>가운데는 그 빛을 뺀 밑색입니다. 구분선을 옮겨 원본과 비교합니다.</li>
+                <li>위 레이어에서 밑색, 그림자, 빛을 켜고 끕니다.</li>
+            </ol>
             <button type="button" className="settings-panel-apply-btn" onClick={onOpenSample}>
                 예시 일러스트
             </button>
@@ -32,7 +38,7 @@ export function StudyControls({ study, onOpenSample }) {
                 />
                 <span className="study-light-copy">
                     <strong>{study.lightHex}</strong>
-                    <span>빛 색 · 클릭하거나 드래그해서 집기</span>
+                    <span>빛 색 · 스포이드로 밝은 곳을 집습니다</span>
                 </span>
                 <button type="button" className="study-text-btn" onClick={study.resetLight}>
                     초기화
@@ -92,65 +98,68 @@ export function StudyControls({ study, onOpenSample }) {
                     </button>
                 </>
             )}
-            <div className="study-tool-row" role="group" aria-label="나누기 공간">
-                {[
-                    ["linear", "선형"],
-                    ["srgb", "sRGB"],
-                ].map(([id, label]) => (
-                    <button
-                        key={id}
-                        type="button"
-                        className={`mode-tab${study.space === id ? " mode-tab-active" : ""}`}
-                        aria-pressed={study.space === id}
-                        onClick={() => study.setSpace(id)}
-                    >
-                        {label}
-                    </button>
-                ))}
-            </div>
-            <p className="study-note">
-                {study.space === "linear"
-                    ? "선형 sRGB에서 빛 색으로 나눕니다. von Kries 화이트 밸런스입니다."
-                    : "채널을 그대로 나눕니다. 그리기 앱의 Divide와 같습니다."}
-            </p>
-            <label>
-                강도 {study.strength}%
-                <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={study.strength}
-                    aria-label="나누기 강도"
-                    onChange={(event) => study.setStrength(Number(event.target.value))}
-                />
-            </label>
-            <label>
-                노출 {study.exposure.toFixed(2)}
-                <input
-                    type="range"
-                    min="0.4"
-                    max="2.2"
-                    step="0.05"
-                    value={study.exposure}
-                    aria-label="노출"
-                    onChange={(event) => study.setExposure(Number(event.target.value))}
-                />
-            </label>
+            <details className="study-more">
+                <summary>더 조정하기</summary>
+                <div className="study-tool-row" role="group" aria-label="나누기 공간">
+                    {[
+                        ["linear", "선형"],
+                        ["srgb", "sRGB"],
+                    ].map(([id, label]) => (
+                        <button
+                            key={id}
+                            type="button"
+                            className={`mode-tab${study.space === id ? " mode-tab-active" : ""}`}
+                            aria-pressed={study.space === id}
+                            onClick={() => study.setSpace(id)}
+                        >
+                            {label}
+                        </button>
+                    ))}
+                </div>
+                <p className="study-note">
+                    {study.space === "linear"
+                        ? "그림에 깔린 빛 색을 빼서 물감 색에 가깝게 맞춥니다."
+                        : "각 색을 빛 색으로 그대로 나눕니다. 그리기 앱의 Divide와 같습니다."}
+                </p>
+                <label>
+                    강도 {study.strength}%
+                    <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={study.strength}
+                        aria-label="나누기 강도"
+                        onChange={(event) => study.setStrength(Number(event.target.value))}
+                    />
+                </label>
+                <label>
+                    노출 {study.exposure.toFixed(2)}
+                    <input
+                        type="range"
+                        min="0.4"
+                        max="2.2"
+                        step="0.05"
+                        value={study.exposure}
+                        aria-label="노출"
+                        onChange={(event) => study.setExposure(Number(event.target.value))}
+                    />
+                </label>
+            </details>
         </div>
     );
 }
 
 function studyHint(study) {
     if (study.view === "compose") {
-        return "밑색 위에 그림자(Multiply)와 빛(Screen)을 겹친 결과입니다. 오른쪽 레이어에서 켜고 끄세요.";
+        return "밑색 위에 그림자와 빛을 다시 겹친 모습입니다. 위쪽 레이어에서 하나씩 켜고 끄세요.";
     }
     if (study.view === "reverse") {
-        return `밑색에 빛 색 ${study.lightHex}을 Multiply로 곱한 색입니다. 나누기의 반대입니다.`;
+        return `밑색에 빛 색 ${study.lightHex}을 다시 곱한 색입니다. 빛을 빼기 전과 비슷해집니다.`;
     }
     if (study.scope === "brush") {
-        return "브러시로 칠한 픽셀만 빛 색으로 나눕니다. 구분선 왼쪽은 원본입니다.";
+        return "브러시로 칠한 곳만 빛을 뺍니다. 구분선 왼쪽은 원본입니다.";
     }
-    return "구분선 왼쪽은 원본, 오른쪽은 빛 색을 나눈 결과입니다. 스포이드로 빛 틴트를 집으세요.";
+    return "구분선 왼쪽은 원본, 오른쪽은 빛을 뺀 밑색입니다. 스포이드로 밝은 곳을 집으세요.";
 }
 
 export function StudySummary({ study }) {
@@ -360,14 +369,7 @@ export function StudyLayers({ study }) {
     const copied = useCopiedHex();
     const analysis = study.analysis;
     if (!analysis) {
-        return (
-            <>
-                <div className="layer-dock-header">
-                    <span className="layer-dock-title">레이어</span>
-                </div>
-                <div className="panel-placeholder panel-placeholder-dark">분해하는 중</div>
-            </>
-        );
+        return <div className="panel-placeholder panel-placeholder-dark">분해하는 중</div>;
     }
     const ordered = analysis.bases
         .map((base, index) => ({ base, index }))
@@ -376,7 +378,6 @@ export function StudyLayers({ study }) {
     return (
         <>
             <div className="layer-dock-header">
-                <span className="layer-dock-title">레이어</span>
                 <div className="layer-dock-actions">
                     {study.colorsModified && (
                         <button type="button" className="layer-dock-reset-btn" onClick={study.resetColors}>
