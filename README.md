@@ -99,6 +99,16 @@ public/models/lineart.onnx  # 선화 추출 모델 가중치
 
 크로스 오리진 격리 헤더(COOP/COEP)가 켜져 있어야 ONNX 런타임이 멀티스레드로 동작합니다. `vite.config.js`에서 dev/preview 서버에 기본 설정되어 있습니다.
 
+## SVG 트레이스
+
+SVG 탭은 올린 원본을 브라우저 안에서 열 단계로 다시 그립니다. 색면은 [vtracer](https://github.com/visioncortex/vtracer) WASM(MIT)으로 따고, 모드는 스플라인과 hierarchical stacked입니다. 선화는 그 추적과 따로, 기존 온디바이스 선화 레이어로 둡니다. 단계의 순서와 오차 점수는 [drawn-in-svg](https://github.com/jammaru/drawn-in-svg)(MIT)의 배치를 옮긴 것입니다. 그 저장소는 Gemini가 만들었고, 배치 스크립트는 일반 이미지 처리입니다.
+
+## Credits
+
+- Snowy city, the default sample. Image by [qiaominxu 橋茗旭](https://pixabay.com/users/qiaominxu_橋茗旭-18717949/) from [Pixabay](https://pixabay.com/).
+- Girl at a desk. Image by [qiaominxu_橋茗旭](https://pixabay.com/users/qiaominxu_橋茗旭-18717949/) from [Pixabay](https://pixabay.com/). Pixabay labels this illustration AI-generated.
+- Cute figure with a cat. Image by [Sushi_musume_jk](https://pixabay.com/users/sushi_musume_jk-42518915/) from [Pixabay](https://pixabay.com/). Pixabay labels this illustration AI-generated.
+
 ## License
 
 MIT. [LICENSE](LICENSE) 참고.
