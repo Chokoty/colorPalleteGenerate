@@ -912,57 +912,6 @@ function App() {
         }, 10);
     };
 
-    const addColorFromImage = (event) => {
-        const stored = imageRef.current;
-        const img = previewCanvasRef.current;
-        const ids = clusterIdsRef.current;
-        if (!stored || !img || !ids || clusters.length === 0) return;
-        const bounds = img.getBoundingClientRect();
-        if (bounds.width === 0 || bounds.height === 0) return;
-        const relX = (event.clientX - bounds.left) / bounds.width;
-        const relY = (event.clientY - bounds.top) / bounds.height;
-        if (relX < 0 || relY < 0 || relX > 1 || relY > 1) return;
-        const x = Math.min(stored.width - 1, Math.max(0, Math.floor(relX * stored.width)));
-        const y = Math.min(stored.height - 1, Math.max(0, Math.floor(relY * stored.height)));
-        const offset = (y * stored.width + x) * 4;
-        if (stored.data[offset + 3] < 128) return;
-        const rgb = [
-            stored.data[offset] / 255,
-            stored.data[offset + 1] / 255,
-            stored.data[offset + 2] / 255,
-        ];
-        const hex = rgbToHex(rgb);
-        if (clusters.some((center) => rgbToHex(center.rgb) === hex)) return;
-        const next = [
-            ...clusters,
-            { rgb, xy: [x / Math.max(1, stored.width), y / Math.max(1, stored.height)] },
-        ];
-        if (modeRef.current === "manual") {
-            assignRgbIds(stored.data, stored.width, stored.height, next, colorWeight, spatialWeight, ids);
-        } else {
-            assignLabIds(
-                stored.data,
-                stored.width,
-                stored.height,
-                next,
-                colorWeight,
-                spatialWeight,
-                ids,
-                false
-            );
-        }
-        const nextVisible = colorVisibleRef.current.slice(0, clusters.length);
-        while (nextVisible.length < clusters.length) nextVisible.push(true);
-        nextVisible.push(true);
-        colorVisibleRef.current = nextVisible;
-        setColorVisible(nextVisible);
-        setClusters(next);
-        const stats = clusterStats(stored.data, stored.width, stored.height, ids, next);
-        setOpaqueShares(stats.shares);
-        setClusterPositions(stats.positions);
-        updateCanvasAndLayers(next);
-    };
-
     const setAllColorsVisible = (visible) => {
         const next = clusters.map(() => visible);
         colorVisibleRef.current = next;
@@ -1439,7 +1388,6 @@ function App() {
                         </button>
                         {inkNote && <span className="header-toolbar-note">{inkNote}</span>}
                     </div>
-                    <p className="app-header-hint">미리보기를 클릭하면 그 색이 팔레트에 더해집니다.</p>
                 </>
             )}
             <div className="button-row">
@@ -1644,7 +1592,6 @@ function App() {
                                                             ref={previewCanvasRef}
                                                             className="stage-canvas checker-bg"
                                                             style={{ display: centerTab === "recolor" ? "block" : "none" }}
-                                                            onClick={addColorFromImage}
                                                             aria-label="미리보기"
                                                         />
                                                         <img

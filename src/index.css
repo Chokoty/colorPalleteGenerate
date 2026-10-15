@@ -521,8 +521,7 @@ b {
     border: none;
 }
 
-.source-frame img,
-.stage-canvas {
+.source-frame img {
     cursor: crosshair;
 }
 
