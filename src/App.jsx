@@ -14,6 +14,7 @@ import SvgPanel from "./SvgPanel";
 import { useColorStudy } from "./useColorStudy";
 import { playClick, setClickSoundEnabled } from "./ui/clickSound";
 import { ReplayChrome } from "./ui/ReplayChrome";
+import { addPick, centersWithPicks, pickAt, removePick, restorePicks, rgb01ToHex } from "./pickedColors";
 
 // Main-branch extraction: the user picks k, and centers are k-means means
 // of sampled RGB+XY points. Recolor fills each pixel with its center.
@@ -231,14 +232,6 @@ function viewSamples(uniqueColors) {
     return sampled;
 }
 
-function rgbToHex(rgb) {
-    const channel = (value) =>
-        Math.floor(value * 255)
-            .toString(16)
-            .padStart(2, "0");
-    return `#${channel(rgb[0])}${channel(rgb[1])}${channel(rgb[2])}`;
-}
-
 // Share of opaque pixels (alpha ≥ 128) assigned to each swatch, plus one
 // pin position per swatch: the actual pixel whose own color is closest to
 // the swatch, not the average position of every assigned pixel. A sprawling,
@@ -452,6 +445,8 @@ function App() {
     const [isLoadingImage, setIsLoadingImage] = useState(false);
     const [imageInfo, setImageInfo] = useState(null);
     const [clusterPositions, setClusterPositions] = useState([]);
+    const [pickedPoints, setPickedPoints] = useState([]);
+    const [eyedropper, setEyedropper] = useState(false);
     const [centerTab, setCenterTab] = useState("recolor");
     const [copiedHex, setCopiedHex] = useState(null);
     const copiedHexTimeoutRef = useRef(null);
@@ -477,6 +472,8 @@ function App() {
     const contourOpacityRef = useRef(100);
     const shadingOpacityRef = useRef(100);
     const clustersRef = useRef([]);
+    const pickedPointsRef = useRef([]);
+    const pickSerialRef = useRef(0);
     const originalClustersRef = useRef([]);
     const clusterIdsRef = useRef(null);
     const manualSamplesRef = useRef(null);
@@ -602,8 +599,8 @@ function App() {
             manualSamplesRef.current = sampled;
             setSamplePoints(sceneCloud(sampled));
         }
-        const centers = kMeansClustering(sampled, count, nextColor, nextSpatial, 50);
-        if (centers.length === 0) {
+        const extracted = kMeansClustering(sampled, count, nextColor, nextSpatial, 50);
+        if (extracted.length === 0) {
             clusterIdsRef.current = null;
             setClusters([]);
             setOpaqueShares([]);
@@ -611,10 +608,11 @@ function App() {
             setLayerImages([]);
             return;
         }
+        const centers = centersWithPicks(extracted, pickedPointsRef.current, width, height);
         const ids = idsFor(stored);
         assignRgbIds(data, width, height, centers, nextColor, nextSpatial, ids);
         setClusters(centers);
-        const orig = centers.map((c) => ({ ...c, rgb: [...c.rgb] }));
+        const orig = centers.filter((center) => !center.pickId).map((c) => ({ ...c, rgb: [...c.rgb] }));
         originalClustersRef.current = orig;
         setOriginalClusters(orig);
         setClusterCount(count);
@@ -641,8 +639,8 @@ function App() {
             `In-image palette (${extracted.palette.length} colors, max ΔE ${extracted.maxDeltaE.toFixed(1)} / stop ${extracted.deltaEStop}):`,
             extracted.palette
         );
-        const centers = paletteCenters(extracted.palette);
-        if (centers.length === 0) {
+        const palette = paletteCenters(extracted.palette);
+        if (palette.length === 0) {
             clusterIdsRef.current = null;
             setSamplePoints([]);
             setClusters([]);
@@ -652,14 +650,15 @@ function App() {
             setDeltaEStop(extracted.deltaEStop);
             return;
         }
+        const centers = centersWithPicks(palette, pickedPointsRef.current, width, height);
         const ids = idsFor(stored);
         assignLabIds(data, width, height, centers, nextColor, nextSpatial, ids, true);
         setSamplePoints(viewSamples(extracted.uniqueColors));
         setClusters(centers);
-        const orig = centers.map((c) => ({ ...c, rgb: [...c.rgb] }));
+        const orig = centers.filter((center) => !center.pickId).map((c) => ({ ...c, rgb: [...c.rgb] }));
         originalClustersRef.current = orig;
         setOriginalClusters(orig);
-        setClusterCount(centers.length);
+        setClusterCount(palette.length);
         colorVisibleRef.current = centers.map(() => true);
         setColorVisible(colorVisibleRef.current);
         colorOpacityRef.current = centers.map(() => 100);
@@ -719,6 +718,9 @@ function App() {
                     showContourRef.current = false;
                     lineArtVisibleRef.current = true;
                     colorVisibleRef.current = [];
+                    pickedPointsRef.current = [];
+                    pickSerialRef.current = 0;
+                    setPickedPoints([]);
                     setShowContourLayer(false);
                     setLineArtVisible(true);
                     setColorVisible([]);
@@ -816,6 +818,14 @@ function App() {
         ];
         const newClusters = [...clusters];
         newClusters[index] = { ...newClusters[index], rgb };
+        const pickId = newClusters[index].pickId;
+        if (pickId) {
+            const nextPicks = pickedPointsRef.current.map((pick) =>
+                pick.id === pickId ? { ...pick, rgb: rgb.slice() } : pick
+            );
+            pickedPointsRef.current = nextPicks;
+            setPickedPoints(nextPicks);
+        }
         setClusters(newClusters);
         if (imageRef.current && clusterIdsRef.current) {
             const { data, width, height } = imageRef.current;
@@ -837,6 +847,30 @@ function App() {
     };
 
     const resetSingleColor = (index) => {
+        const current = clusters[index];
+        if (current?.pickId) {
+            const pick = pickedPointsRef.current.find((item) => item.id === current.pickId);
+            if (!pick) return;
+            const rgb = pick.sourceRgb.slice();
+            const nextPicks = pickedPointsRef.current.map((item) =>
+                item.id === pick.id ? { ...item, rgb: rgb.slice() } : item
+            );
+            pickedPointsRef.current = nextPicks;
+            setPickedPoints(nextPicks);
+            const newClusters = [...clusters];
+            newClusters[index] = { ...current, rgb };
+            setClusters(newClusters);
+            if (imageRef.current && clusterIdsRef.current) {
+                const { data, width, height } = imageRef.current;
+                const stats = clusterStats(data, width, height, clusterIdsRef.current, newClusters);
+                setOpaqueShares(stats.shares);
+                setClusterPositions(stats.positions);
+            }
+            if (canvasRef.current && clusterIdsRef.current) {
+                updateCanvasAndLayers(newClusters);
+            }
+            return;
+        }
         const orig = originalClustersRef.current;
         if (!orig || !orig[index]) return;
         const newClusters = [...clusters];
@@ -856,7 +890,18 @@ function App() {
     const resetAllColors = () => {
         const orig = originalClustersRef.current;
         if (!orig || orig.length === 0) return;
-        const newClusters = orig.map((c) => ({ ...c, rgb: [...c.rgb] }));
+        const restored = restorePicks(pickedPointsRef.current);
+        pickedPointsRef.current = restored;
+        setPickedPoints(restored);
+        const stored = imageRef.current;
+        const newClusters = stored
+            ? centersWithPicks(
+                  orig.map((c) => ({ ...c, rgb: [...c.rgb] })),
+                  restored,
+                  stored.width,
+                  stored.height
+              )
+            : orig.map((c) => ({ ...c, rgb: [...c.rgb] }));
         setClusters(newClusters);
         if (imageRef.current && clusterIdsRef.current) {
             const { data, width, height } = imageRef.current;
@@ -912,6 +957,79 @@ function App() {
         }, 10);
     };
 
+    const commitPicks = (nextPicks) => {
+        pickedPointsRef.current = nextPicks;
+        setPickedPoints(nextPicks);
+        const stored = imageRef.current;
+        const extracted = clustersRef.current.filter((center) => center && !center.pickId);
+        if (!stored || !clusterIdsRef.current || extracted.length === 0) return;
+        const centers = centersWithPicks(extracted, nextPicks, stored.width, stored.height);
+        const ids = idsFor(stored);
+        if (modeRef.current === "manual") {
+            assignRgbIds(stored.data, stored.width, stored.height, centers, colorWeight, spatialWeight, ids);
+        } else {
+            assignLabIds(stored.data, stored.width, stored.height, centers, colorWeight, spatialWeight, ids, false);
+        }
+        const oldCenters = clustersRef.current;
+        const prevVisible = colorVisibleRef.current;
+        const prevOpacity = colorOpacityRef.current;
+        const oldIndexFor = (center, index) =>
+            center.pickId ? oldCenters.findIndex((item) => item?.pickId === center.pickId) : index;
+        const visible = centers.map((center, index) => {
+            const oldIndex = oldIndexFor(center, index);
+            if (oldIndex < 0 || oldIndex >= prevVisible.length) return true;
+            return prevVisible[oldIndex] !== false;
+        });
+        const opacity = centers.map((center, index) => {
+            const oldIndex = oldIndexFor(center, index);
+            if (oldIndex < 0 || oldIndex >= prevOpacity.length) return 100;
+            return prevOpacity[oldIndex] ?? 100;
+        });
+        colorVisibleRef.current = visible;
+        setColorVisible(visible);
+        colorOpacityRef.current = opacity;
+        setColorOpacity(opacity);
+        clustersRef.current = centers;
+        setClusters(centers);
+        const stats = clusterStats(stored.data, stored.width, stored.height, ids, centers);
+        setOpaqueShares(stats.shares);
+        setClusterPositions(stats.positions);
+        updateCanvasAndLayers(centers);
+    };
+
+    const addPickFromOriginal = (event) => {
+        if (event.target.closest(".pick-marker")) return;
+        const stored = imageRef.current;
+        const frame = event.currentTarget.querySelector(".original-image");
+        if (!stored || !frame) return;
+        const bounds = frame.getBoundingClientRect();
+        if (bounds.width === 0 || bounds.height === 0) return;
+        const relX = (event.clientX - bounds.left) / bounds.width;
+        const relY = (event.clientY - bounds.top) / bounds.height;
+        if (relX < 0 || relY < 0 || relX > 1 || relY > 1) return;
+        const x = Math.min(stored.width - 1, Math.max(0, Math.floor(relX * stored.width)));
+        const y = Math.min(stored.height - 1, Math.max(0, Math.floor(relY * stored.height)));
+        const pick = pickAt(stored.data, stored.width, stored.height, x, y, `pick-${pickSerialRef.current + 1}`);
+        if (!pick) return;
+        const extracted = clustersRef.current.filter((center) => center && !center.pickId);
+        const next = addPick(
+            pickedPointsRef.current,
+            pick,
+            extracted.map((center) => rgb01ToHex(center.rgb))
+        );
+        if (next === pickedPointsRef.current) return;
+        pickSerialRef.current += 1;
+        commitPicks(next);
+    };
+
+    const dropPick = (event, id) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const next = removePick(pickedPointsRef.current, id);
+        if (next === pickedPointsRef.current) return;
+        commitPicks(next);
+    };
+
     const setAllColorsVisible = (visible) => {
         const next = clusters.map(() => visible);
         colorVisibleRef.current = next;
@@ -932,6 +1050,7 @@ function App() {
     lineArtVisibleRef.current = lineArtVisible;
     colorVisibleRef.current = colorVisible;
     clustersRef.current = clusters;
+    pickedPointsRef.current = pickedPoints;
     bgColorRef.current = bgColor;
     bgVisibleRef.current = bgVisible;
     colorOpacityRef.current = colorOpacity;
@@ -1157,6 +1276,11 @@ function App() {
     }, [imageData]);
 
     useEffect(() => {
+        pickedPointsRef.current = [];
+        setPickedPoints([]);
+    }, [uploadId]);
+
+    useEffect(() => {
         paintComposite();
     }, [
         imageData,
@@ -1224,6 +1348,19 @@ function App() {
         return () => window.removeEventListener("keydown", onKey);
     }, [replayOpen, replayMenu]);
 
+    const rgbEdited = (left, right) =>
+        Math.abs(left[0] - right[0]) > 0.001 ||
+        Math.abs(left[1] - right[1]) > 0.001 ||
+        Math.abs(left[2] - right[2]) > 0.001;
+    const swatchEdited = (center, index) => {
+        if (!center?.rgb) return false;
+        if (center.pickId) {
+            const pick = pickedPoints.find((item) => item.id === center.pickId);
+            return Boolean(pick && rgbEdited(center.rgb, pick.sourceRgb));
+        }
+        const orig = originalClusters[index];
+        return Boolean(orig && rgbEdited(center.rgb, orig.rgb));
+    };
     const isLandscape = !imageInfo || imageInfo.width >= imageInfo.height;
     const shareBarItems = clusters
         .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
@@ -1236,9 +1373,9 @@ function App() {
                     key={`${keyPrefix}-${item.i}`}
                     style={{
                         flex: `${shareWeight(item.share)} 1 0`,
-                        background: rgbToHex(item.c.rgb),
+                        background: rgb01ToHex(item.c.rgb),
                     }}
-                    data-tooltip={`${rgbToHex(item.c.rgb)} · ${item.share.toFixed(1)}%`}
+                    data-tooltip={`${rgb01ToHex(item.c.rgb)} · ${item.share.toFixed(1)}%`}
                 />
             ))}
         </div>
@@ -1495,13 +1632,26 @@ function App() {
                     )}
                     {imageData && mode !== "study" && (
                         <div className="panel-image">
+                            <div className="button-row">
+                                <button
+                                    type="button"
+                                    className="mode-tab"
+                                    aria-pressed={eyedropper}
+                                    onClick={() => setEyedropper((armed) => !armed)}
+                                >
+                                    스포이트
+                                </button>
+                            </div>
                             <span className="image-frame-label">원본</span>
-                            <div className="image-with-dots">
+                            <div
+                                className={`image-with-dots${eyedropper ? " is-picking" : ""}`}
+                                onClick={eyedropper ? addPickFromOriginal : undefined}
+                            >
                                 <img className="original-image checker-bg" src={imageData} alt="원본" />
                                 {clusters.map((c, i) => {
                                     const pos = clusterPositions[i];
-                                    if (!c?.rgb || !pos) return null;
-                                    const hex = rgbToHex(c.rgb);
+                                    if (!c?.rgb || !pos || c.pickId) return null;
+                                    const hex = rgb01ToHex(c.rgb);
                                     return (
                                         <span
                                             key={`${mode}-dot-${i}`}
@@ -1511,6 +1661,26 @@ function App() {
                                         />
                                     );
                                 })}
+                                {imageRef.current &&
+                                    pickedPoints.map((pick) => {
+                                        const hex = rgb01ToHex(pick.rgb);
+                                        return (
+                                            <button
+                                                key={pick.id}
+                                                type="button"
+                                                className="pick-marker"
+                                                style={{
+                                                    left: `${(pick.x / imageRef.current.width) * 100}%`,
+                                                    top: `${(pick.y / imageRef.current.height) * 100}%`,
+                                                    background: hex,
+                                                }}
+                                                aria-label={`${hex} 제거`}
+                                                onClick={(event) => dropPick(event, pick.id)}
+                                            >
+                                                <span className="pick-marker-x">×</span>
+                                            </button>
+                                        );
+                                    })}
                             </div>
                             {imageInfo && (
                                 <div className="image-info">
@@ -1655,15 +1825,7 @@ function App() {
                             {clusters.length > 0 && (
                                 <div className="layer-dock-actions">
                                     {originalClusters.length > 0 &&
-                                        clusters.some((c, idx) => {
-                                            const orig = originalClusters[idx];
-                                            if (!orig || !c) return false;
-                                            return (
-                                                Math.abs(c.rgb[0] - orig.rgb[0]) > 0.001 ||
-                                                Math.abs(c.rgb[1] - orig.rgb[1]) > 0.001 ||
-                                                Math.abs(c.rgb[2] - orig.rgb[2]) > 0.001
-                                            );
-                                        }) && (
+                                        clusters.some((center, index) => swatchEdited(center, index)) && (
                                             <button type="button" className="layer-dock-reset-btn" onClick={resetAllColors} title="모든 색상 초기화">
                                                 색상 초기화
                                             </button>
@@ -1789,15 +1951,10 @@ function App() {
                             .filter((item) => item.c?.rgb)
                             .sort((a, b) => b.share - a.share || a.i - b.i)
                             .map(({ c, i, share }, orderIndex) => {
-                                const hex = rgbToHex(c.rgb);
+                                const hex = rgb01ToHex(c.rgb);
                                 const shown = colorVisible[i] !== false;
                                 const opacity = colorOpacity[i] ?? 100;
-                                const orig = originalClusters[i];
-                                const isModified =
-                                    orig &&
-                                    (Math.abs(c.rgb[0] - orig.rgb[0]) > 0.001 ||
-                                        Math.abs(c.rgb[1] - orig.rgb[1]) > 0.001 ||
-                                        Math.abs(c.rgb[2] - orig.rgb[2]) > 0.001);
+                                const isModified = swatchEdited(c, i);
                                 return (
                                     <div key={`${mode}-layer-${i}`} className="layer-row-wrapper">
                                         <label className="layer-row" data-hidden={shown ? "false" : "true"}>

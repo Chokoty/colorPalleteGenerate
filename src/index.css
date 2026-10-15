@@ -686,6 +686,37 @@ input[type="checkbox"] {
     cursor: default;
 }
 
+.image-with-dots.is-picking,
+.image-with-dots.is-picking .original-image {
+    cursor: crosshair;
+}
+
+.pick-marker {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 1px solid var(--line);
+    box-shadow: 0 0 0 1px var(--paper);
+    transform: translate(-50%, -50%);
+    z-index: 1;
+}
+
+.pick-marker-x {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--ink);
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 12px;
+    text-align: center;
+}
+
 .layer-dock {
     flex: 0 0 272px;
     width: 272px;
