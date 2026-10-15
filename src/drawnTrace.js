@@ -571,6 +571,53 @@ function paintedRgba(ref, labels, ids, width, height) {
     return out;
 }
 
+function formatCoord(value) {
+    const rounded = Math.round(value * 1000) / 1000;
+    return Object.is(rounded, -0) ? "0" : String(rounded);
+}
+
+const PATH_ARITY = { M: 2, L: 2, T: 2, H: 1, V: 1, C: 6, S: 4, Q: 4, A: 7 };
+
+function translatePath(d, tx, ty) {
+    const tokens = d.match(/[a-zA-Z]|-?\d*\.?\d+(?:e[-+]?\d+)?/gi);
+    if (!tokens) return d;
+    const parts = [];
+    let index = 0;
+    let command = "M";
+    while (index < tokens.length) {
+        if (/^[a-zA-Z]$/.test(tokens[index])) {
+            command = tokens[index];
+            index += 1;
+        }
+        const op = command.toUpperCase();
+        if (op === "Z") {
+            parts.push(command);
+            continue;
+        }
+        const count = PATH_ARITY[op];
+        if (!count || index + count > tokens.length) break;
+        const nums = tokens.slice(index, index + count).map(Number);
+        index += count;
+        const relative = command !== op;
+        if (!relative) {
+            if (op === "H") nums[0] += tx;
+            else if (op === "V") nums[0] += ty;
+            else if (op === "A") {
+                nums[5] += tx;
+                nums[6] += ty;
+            } else {
+                for (let pair = 0; pair < nums.length; pair += 2) {
+                    nums[pair] += tx;
+                    nums[pair + 1] += ty;
+                }
+            }
+        }
+        parts.push(nums.length ? command + nums.map(formatCoord).join(" ") : command);
+        if (op === "M") command = relative ? "l" : "L";
+    }
+    return parts.join(" ");
+}
+
 export function parseSvgPaths(svg) {
     const paths = [];
     const tags = String(svg).matchAll(/<path\b([^>]*)\/?>/g);
@@ -579,7 +626,12 @@ export function parseSvgPaths(svg) {
         const d = /(?:^|\s)d="([^"]+)"/.exec(attrs)?.[1];
         const fill = /(?:^|\s)fill="([^"]+)"/.exec(attrs)?.[1];
         if (!d || !fill || fill === "none") continue;
-        paths.push({ d, fill, opacity: 1 });
+        const shift = /translate\(\s*([+-]?(?:\d*\.)?\d+(?:e[+-]?\d+)?)(?:[\s,]+([+-]?(?:\d*\.)?\d+(?:e[+-]?\d+)?))?\s*\)/i.exec(
+            attrs
+        );
+        const tx = shift ? Number(shift[1]) : 0;
+        const ty = shift && shift[2] != null ? Number(shift[2]) : 0;
+        paths.push({ d: tx || ty ? translatePath(d, tx, ty) : d, fill, opacity: 1 });
     }
     return paths;
 }
