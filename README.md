@@ -105,7 +105,9 @@ SVG 탭은 올린 원본을 브라우저 안에서 열 단계로 다시 그립�
 
 ## Credits
 
-Image by [qiaominxu 橋茗旭](https://pixabay.com/users/qiaominxu_橋茗旭-18717949/) from [Pixabay](https://pixabay.com/).
+- Snowy city, the default sample. Image by [qiaominxu 橋茗旭](https://pixabay.com/users/qiaominxu_橋茗旭-18717949/) from [Pixabay](https://pixabay.com/).
+- Girl at a desk. Image by [qiaominxu_橋茗旭](https://pixabay.com/users/qiaominxu_橋茗旭-18717949/) from [Pixabay](https://pixabay.com/). Pixabay labels this illustration AI-generated.
+- Cute figure with a cat. Image by [Sushi_musume_jk](https://pixabay.com/users/sushi_musume_jk-42518915/) from [Pixabay](https://pixabay.com/). Pixabay labels this illustration AI-generated.
 
 ## License
 

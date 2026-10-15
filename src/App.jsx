@@ -11,6 +11,7 @@ import { contourMask, dilate, gradientEdges } from "./imageOutline";
 import { extractLineArt } from "./lineartModel";
 import { StudyControls, StudyLayers, StudyStage, StudySummary, StudyTools } from "./ColorStudy";
 import { StartGuide } from "./StartGuide";
+import { DEFAULT_SAMPLE, SAMPLES } from "./samples";
 import SvgPanel from "./SvgPanel";
 import { useColorStudy } from "./useColorStudy";
 import { playClick, setClickSoundEnabled } from "./ui/clickSound";
@@ -493,7 +494,7 @@ function App() {
     const [svgReplay, setSvgReplay] = useState(false);
     const [layersOpen, setLayersOpen] = useState(true);
     const [studyOpen, setStudyOpen] = useState(true);
-    const [usingSample, setUsingSample] = useState(false);
+    const [activeSampleId, setActiveSampleId] = useState(null);
     const loadSerialRef = useRef(0);
     const loadImageFileRef = useRef(null);
 
@@ -745,7 +746,7 @@ function App() {
                         width: img.width,
                         height: img.height,
                     });
-                    setUsingSample(source === "sample");
+                    setActiveSampleId(source === "upload" ? null : source);
                     if (modeRef.current !== "study") {
                         runCurrent(
                             stored,
@@ -791,14 +792,14 @@ function App() {
         loadImageFile(event.dataTransfer.files[0]);
     };
 
-    const openStudySample = () => {
-        fetch("/samples/default.webp")
+    const openSample = (sample) => {
+        fetch(`/samples/${sample.file}`)
             .then((response) => {
                 if (!response.ok) throw new Error("sample");
                 return response.blob();
             })
             .then((blob) => {
-                loadImageFile(new File([blob], "default.webp", { type: "image/webp" }), "sample");
+                loadImageFile(new File([blob], sample.file, { type: "image/webp" }), sample.id);
             })
             .catch(() => setLoadError("예시 이미지를 열지 못했습니다."));
     };
@@ -806,14 +807,15 @@ function App() {
 
     useEffect(() => {
         let cancelled = false;
-        fetch("/samples/default.webp")
+        const sample = DEFAULT_SAMPLE;
+        fetch(`/samples/${sample.file}`)
             .then((response) => {
                 if (!response.ok) throw new Error("sample");
                 return response.blob();
             })
             .then((blob) => {
                 if (cancelled) return;
-                loadImageFileRef.current(new File([blob], "default.webp", { type: "image/webp" }), "sample");
+                loadImageFileRef.current(new File([blob], sample.file, { type: "image/webp" }), sample.id);
             })
             .catch(() => {
                 if (!cancelled) setLoadError("예시 이미지를 열지 못했습니다.");
@@ -1517,11 +1519,18 @@ function App() {
         </div>
     );
 
+    const activeSample = SAMPLES.find((sample) => sample.id === activeSampleId) ?? null;
+
     const tools = (
         <>
             {replayOpen && renderModeTabs(true)}
             {replayOpen && mode === "study" && (
-                <StudyControls study={study} onOpenSample={openStudySample} />
+                <StudyControls
+                    study={study}
+                    samples={SAMPLES}
+                    activeSampleId={activeSampleId}
+                    onOpenSample={openSample}
+                />
             )}
             {imageData && centerTab !== "svg" && renderViewTabs()}
             {imageData && mode === "study" && centerTab !== "svg" && <StudyTools study={study} />}
@@ -1811,15 +1820,11 @@ function App() {
                             />
                         </div>
                     )}
-                    {usingSample && (
+                    {activeSample && (
                         <p className="sample-credit">
                             Image by{" "}
-                            <a
-                                href="https://pixabay.com/users/qiaominxu_橋茗旭-18717949/"
-                                target="_blank"
-                                rel="noreferrer"
-                            >
-                                qiaominxu 橋茗旭
+                            <a href={activeSample.profile} target="_blank" rel="noreferrer">
+                                {activeSample.author}
                             </a>{" "}
                             from{" "}
                             <a href="https://pixabay.com/" target="_blank" rel="noreferrer">
@@ -2113,7 +2118,12 @@ function App() {
                                 <span className="layer-dock-title">채색 공부</span>
                                 <span className="dock-summary-hint">빛을 빼서 밑색을 봅니다</span>
                             </summary>
-                            <StudyControls study={study} onOpenSample={openStudySample} />
+                            <StudyControls
+                                study={study}
+                                samples={SAMPLES}
+                                activeSampleId={activeSampleId}
+                                onOpenSample={openSample}
+                            />
                         </details>
                     )}
                 </aside>

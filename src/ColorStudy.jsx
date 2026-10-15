@@ -13,18 +13,29 @@ function bitmapPoint(event, canvas, width, height) {
     };
 }
 
-export function StudyControls({ study, onOpenSample }) {
+export function StudyControls({ study, samples, activeSampleId, onOpenSample }) {
     return (
         <div className="study-controls">
             <ol className="study-steps">
-                <li>예시 일러스트를 열거나, 왼쪽에서 그림을 올립니다.</li>
+                <li>아래 예시 중 하나를 고르거나, 왼쪽에서 그림을 올립니다.</li>
                 <li>스포이드로 그림의 밝은 부분을 집으면 그 색이 빛 색이 됩니다.</li>
                 <li>가운데는 그 빛을 뺀 밑색입니다. 구분선을 옮겨 원본과 비교합니다.</li>
                 <li>위 레이어에서 밑색, 그림자, 빛을 켜고 끕니다.</li>
             </ol>
-            <button type="button" className="settings-panel-apply-btn" onClick={onOpenSample}>
-                예시 일러스트
-            </button>
+            <div className="sample-picker" role="group" aria-label="예시 그림">
+                {samples.map((sample) => (
+                    <button
+                        key={sample.id}
+                        type="button"
+                        className="sample-thumb"
+                        aria-pressed={activeSampleId === sample.id}
+                        aria-label={sample.alt}
+                        onClick={() => onOpenSample(sample)}
+                    >
+                        <img src={`/samples/${sample.file}`} alt="" />
+                    </button>
+                ))}
+            </div>
             <div className="study-light-row">
                 <input
                     className="study-light-chip"
