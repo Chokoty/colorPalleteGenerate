@@ -10,6 +10,8 @@ import {
 import { contourMask, dilate, gradientEdges } from "./imageOutline";
 import { extractLineArt } from "./lineartModel";
 import { StudyControls, StudyLayers, StudyStage, StudySummary, StudyTools } from "./ColorStudy";
+import { StartGuide } from "./StartGuide";
+import { DEFAULT_SAMPLE, SAMPLES } from "./samples";
 import SvgPanel from "./SvgPanel";
 import { useColorStudy } from "./useColorStudy";
 import { playClick, setClickSoundEnabled } from "./ui/clickSound";
@@ -490,6 +492,11 @@ function App() {
     const [replayOpen, setReplayOpen] = useState(false);
     const [replayMenu, setReplayMenu] = useState(false);
     const [svgReplay, setSvgReplay] = useState(false);
+    const [layersOpen, setLayersOpen] = useState(true);
+    const [studyOpen, setStudyOpen] = useState(true);
+    const [activeSampleId, setActiveSampleId] = useState(null);
+    const loadSerialRef = useRef(0);
+    const loadImageFileRef = useRef(null);
 
     const updateCanvasAndLayers = (centers) => {
         const stored = imageRef.current;
@@ -675,17 +682,19 @@ function App() {
         else runAuto(stored, nextColor, nextSpatial);
     };
 
-    const loadImageFile = (file) => {
+    const loadImageFile = (file, source = "upload") => {
         if (!file) return;
         if (!file.type.startsWith("image/")) {
             setLoadError("이미지 파일만 올릴 수 있습니다.");
             return;
         }
+        const serial = ++loadSerialRef.current;
         setIsLoadingImage(true);
         const reader = new FileReader();
         reader.onload = (e) => {
             const img = new Image();
             img.onload = () => {
+                if (serial !== loadSerialRef.current) return;
                 try {
                     if (!img.width || !img.height) {
                         setLoadError("이미지를 읽지 못했습니다.");
@@ -737,6 +746,7 @@ function App() {
                         width: img.width,
                         height: img.height,
                     });
+                    setActiveSampleId(source === "upload" ? null : source);
                     if (modeRef.current !== "study") {
                         runCurrent(
                             stored,
@@ -748,6 +758,7 @@ function App() {
                     }
                     setIsLoadingImage(false);
                 } catch (error) {
+                    if (serial !== loadSerialRef.current) return;
                     console.error(error);
                     setClusters([]);
                     setSamplePoints([]);
@@ -757,12 +768,14 @@ function App() {
                 }
             };
             img.onerror = () => {
+                if (serial !== loadSerialRef.current) return;
                 setLoadError("이미지를 읽지 못했습니다.");
                 setIsLoadingImage(false);
             };
             img.src = e.target.result;
         };
         reader.onerror = () => {
+            if (serial !== loadSerialRef.current) return;
             setLoadError("이미지를 읽지 못했습니다.");
             setIsLoadingImage(false);
         };
@@ -779,19 +792,41 @@ function App() {
         loadImageFile(event.dataTransfer.files[0]);
     };
 
-    const openStudySample = () => {
-        fetch("/samples/color-study.png")
+    const openSample = (sample) => {
+        fetch(`/samples/${sample.file}`)
             .then((response) => {
                 if (!response.ok) throw new Error("sample");
                 return response.blob();
             })
             .then((blob) => {
-                loadImageFile(new File([blob], "color-study.png", { type: "image/png" }));
+                loadImageFile(new File([blob], sample.file, { type: "image/webp" }), sample.id);
             })
             .catch(() => setLoadError("예시 이미지를 열지 못했습니다."));
     };
+    loadImageFileRef.current = loadImageFile;
+
+    useEffect(() => {
+        let cancelled = false;
+        const sample = DEFAULT_SAMPLE;
+        fetch(`/samples/${sample.file}`)
+            .then((response) => {
+                if (!response.ok) throw new Error("sample");
+                return response.blob();
+            })
+            .then((blob) => {
+                if (cancelled) return;
+                loadImageFileRef.current(new File([blob], sample.file, { type: "image/webp" }), sample.id);
+            })
+            .catch(() => {
+                if (!cancelled) setLoadError("예시 이미지를 열지 못했습니다.");
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const switchMode = (nextMode) => {
+        if (nextMode === "study") setStudyOpen(true);
         if (nextMode === modeRef.current) return;
         modeRef.current = nextMode;
         setMode(nextMode);
@@ -1428,12 +1463,12 @@ function App() {
         if (next) playClick();
     };
 
-    const renderModeTabs = () => (
+    const renderModeTabs = (includeStudy = false) => (
         <div role="tablist" className="mode-tabs" aria-label="추출 방식">
             {[
                 ["auto", "자동 추출"],
                 ["manual", "직접 설정"],
-                ["study", "채색 공부"],
+                ...(includeStudy ? [["study", "채색 공부"]] : []),
             ].map(([id, label]) => (
                 <button
                     key={id}
@@ -1484,11 +1519,18 @@ function App() {
         </div>
     );
 
+    const activeSample = SAMPLES.find((sample) => sample.id === activeSampleId) ?? null;
+
     const tools = (
         <>
-            {replayOpen && renderModeTabs()}
+            {replayOpen && renderModeTabs(true)}
             {replayOpen && mode === "study" && (
-                <StudyControls study={study} onOpenSample={openStudySample} />
+                <StudyControls
+                    study={study}
+                    samples={SAMPLES}
+                    activeSampleId={activeSampleId}
+                    onOpenSample={openSample}
+                />
             )}
             {imageData && centerTab !== "svg" && renderViewTabs()}
             {imageData && mode === "study" && centerTab !== "svg" && <StudyTools study={study} />}
@@ -1574,9 +1616,6 @@ function App() {
                         />
                     </div>
                     {renderModeTabs()}
-                    {mode === "study" && (
-                        <StudyControls study={study} onOpenSample={openStudySample} />
-                    )}
                     {imageData && mode !== "study" && (
                         <div className="panel-image">
                             <div className="button-row">
@@ -1737,9 +1776,7 @@ function App() {
                                     <div className="device-frame">
                                         {!imageData && (
                                             <div className="panel-placeholder">
-                                                {mode === "study"
-                                                    ? "이미지를 업로드하면 밑색, 빛, 그림자로 나눠 보여줍니다"
-                                                    : "이미지를 업로드하면 재색상 결과가 여기에 표시됩니다"}
+                                                <StartGuide />
                                             </div>
                                         )}
                                         {imageData && mode === "study" && <StudyStage study={study} />}
@@ -1783,268 +1820,313 @@ function App() {
                             />
                         </div>
                     )}
+                    {activeSample && (
+                        <p className="sample-credit">
+                            Image by{" "}
+                            <a href={activeSample.profile} target="_blank" rel="noreferrer">
+                                {activeSample.author}
+                            </a>{" "}
+                            from{" "}
+                            <a href="https://pixabay.com/" target="_blank" rel="noreferrer">
+                                Pixabay
+                            </a>
+                        </p>
+                    )}
                 </main>
 
-                {!imageData && (
-                    <aside className="panel panel-right layer-dock" aria-label="레이어">
-                        <div className="layer-dock-header">
+                <aside className="panel panel-right" aria-label="레이어와 채색 공부">
+                    <details
+                        className="layer-dock"
+                        open={layersOpen}
+                        onToggle={(event) => setLayersOpen(event.currentTarget.open)}
+                    >
+                        <summary className="dock-summary">
                             <span className="layer-dock-title">레이어</span>
-                        </div>
-                        <div className="panel-placeholder panel-placeholder-dark">
-                            이미지를 업로드하면 색상 레이어가 여기에 표시됩니다
-                        </div>
-                    </aside>
-                )}
-                {imageData && mode === "study" && (
-                    <aside className="panel panel-right layer-dock" aria-label="레이어">
-                        <StudyLayers study={study} />
-                    </aside>
-                )}
-                {imageData && mode !== "study" && (
-                    <aside className="panel panel-right layer-dock" aria-label="레이어">
-                        <div className="layer-dock-header">
-                            <span className="layer-dock-title">레이어</span>
-                            {clusters.length > 0 && (
-                                <div className="layer-dock-actions">
-                                    {originalClusters.length > 0 &&
-                                        clusters.some((center, index) => swatchEdited(center, index)) && (
-                                            <button type="button" className="layer-dock-reset-btn" onClick={resetAllColors} title="모든 색상 초기화">
-                                                색상 초기화
-                                            </button>
-                                        )}
-                                    <button type="button" onClick={() => setAllColorsVisible(true)}>
-                                        전체 선택
-                                    </button>
-                                    <button type="button" onClick={() => setAllColorsVisible(false)}>
-                                        전체 해제
-                                    </button>
+                            <span className="dock-summary-hint">{layersOpen ? "눌러서 접기" : "눌러서 펼치기"}</span>
+                        </summary>
+                        <div className="dock-body">
+                            {!imageData && (
+                                <div className="panel-placeholder panel-placeholder-dark">
+                                    이미지를 올리면 색마다 칸이 생깁니다.
                                 </div>
                             )}
-                        </div>
-                        {showInk && lineArtThumb && (
+                            {imageData && mode === "study" && <StudyLayers study={study} />}
+                            {imageData && mode !== "study" && (
+                                <>
+                            {clusters.length > 0 && (
+                            <div className="layer-dock-header">
+                                    <div className="layer-dock-actions">
+                                        {originalClusters.length > 0 &&
+                                            clusters.some((center, index) => swatchEdited(center, index)) && (
+                                                <button type="button" className="layer-dock-reset-btn" onClick={resetAllColors} title="모든 색상 초기화">
+                                                    색상 초기화
+                                                </button>
+                                            )}
+                                        <button type="button" onClick={() => setAllColorsVisible(true)}>
+                                            전체 선택
+                                        </button>
+                                        <button type="button" onClick={() => setAllColorsVisible(false)}>
+                                            전체 해제
+                                        </button>
+                                    </div>
+                            </div>
+                            )}
+                            {showInk && lineArtThumb && (
+                                <div className="layer-row-wrapper">
+                                    <label className="layer-row" data-hidden={lineArtVisible ? "false" : "true"}>
+                                        <img src={lineArtThumb} alt="" />
+                                        <span className="layer-name">
+                                            <span className="layer-name-top">선화</span>
+                                            <span className="layer-share">불투명도 {lineArtOpacity}%</span>
+                                        </span>
+                                        <input
+                                            type="checkbox"
+                                            checked={lineArtVisible}
+                                            aria-label="선화 표시"
+                                            onChange={(e) => {
+                                                lineArtVisibleRef.current = e.target.checked;
+                                                setLineArtVisible(e.target.checked);
+                                            }}
+                                        />
+                                    </label>
+                                    {lineArtVisible && (
+                                        <div className="layer-opacity-row">
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="100"
+                                                value={lineArtOpacity}
+                                                aria-label="선화 불투명도"
+                                                onChange={(e) => {
+                                                    const val = Number(e.target.value);
+                                                    lineArtOpacityRef.current = val;
+                                                    setLineArtOpacity(val);
+                                                }}
+                                            />
+                                            <span>{lineArtOpacity}%</span>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                             <div className="layer-row-wrapper">
-                                <label className="layer-row" data-hidden={lineArtVisible ? "false" : "true"}>
-                                    <img src={lineArtThumb} alt="" />
+                                <label className="layer-row" data-hidden={showContourLayer ? "false" : "true"}>
+                                    {contourThumb ? <img src={contourThumb} alt="" /> : <span className="layer-thumb" />}
                                     <span className="layer-name">
-                                        <span className="layer-name-top">선화</span>
-                                        <span className="layer-share">불투명도 {lineArtOpacity}%</span>
+                                        <span className="layer-name-top">윤곽선</span>
+                                        <span className="layer-share">불투명도 {contourOpacity}%</span>
                                     </span>
                                     <input
                                         type="checkbox"
-                                        checked={lineArtVisible}
-                                        aria-label="선화 표시"
+                                        checked={showContourLayer}
+                                        aria-label="윤곽선 표시"
                                         onChange={(e) => {
-                                            lineArtVisibleRef.current = e.target.checked;
-                                            setLineArtVisible(e.target.checked);
+                                            showContourRef.current = e.target.checked;
+                                            setShowContourLayer(e.target.checked);
                                         }}
                                     />
                                 </label>
-                                {lineArtVisible && (
+                                {showContourLayer && (
                                     <div className="layer-opacity-row">
                                         <input
                                             type="range"
                                             min="0"
                                             max="100"
-                                            value={lineArtOpacity}
-                                            aria-label="선화 불투명도"
+                                            value={contourOpacity}
+                                            aria-label="윤곽선 불투명도"
                                             onChange={(e) => {
                                                 const val = Number(e.target.value);
-                                                lineArtOpacityRef.current = val;
-                                                setLineArtOpacity(val);
+                                                contourOpacityRef.current = val;
+                                                setContourOpacity(val);
                                             }}
                                         />
-                                        <span>{lineArtOpacity}%</span>
+                                        <span>{contourOpacity}%</span>
                                     </div>
                                 )}
                             </div>
-                        )}
-                        <div className="layer-row-wrapper">
-                            <label className="layer-row" data-hidden={showContourLayer ? "false" : "true"}>
-                                {contourThumb ? <img src={contourThumb} alt="" /> : <span className="layer-thumb" />}
-                                <span className="layer-name">
-                                    <span className="layer-name-top">윤곽선</span>
-                                    <span className="layer-share">불투명도 {contourOpacity}%</span>
-                                </span>
-                                <input
-                                    type="checkbox"
-                                    checked={showContourLayer}
-                                    aria-label="윤곽선 표시"
-                                    onChange={(e) => {
-                                        showContourRef.current = e.target.checked;
-                                        setShowContourLayer(e.target.checked);
-                                    }}
-                                />
-                            </label>
-                            {showContourLayer && (
-                                <div className="layer-opacity-row">
+                            <div className="layer-row-wrapper">
+                                <label className="layer-row" data-hidden={shadingVisible ? "false" : "true"}>
+                                    <span className="layer-thumb" />
+                                    <span className="layer-name">
+                                        <span className="layer-name-top">음영</span>
+                                        <span className="layer-share">원본 명암 겹침 · {shadingOpacity}%</span>
+                                    </span>
                                     <input
-                                        type="range"
-                                        min="0"
-                                        max="100"
-                                        value={contourOpacity}
-                                        aria-label="윤곽선 불투명도"
+                                        type="checkbox"
+                                        checked={shadingVisible}
+                                        aria-label="음영 표시"
                                         onChange={(e) => {
-                                            const val = Number(e.target.value);
-                                            contourOpacityRef.current = val;
-                                            setContourOpacity(val);
+                                            shadingVisibleRef.current = e.target.checked;
+                                            setShadingVisible(e.target.checked);
                                         }}
                                     />
-                                    <span>{contourOpacity}%</span>
-                                </div>
-                            )}
-                        </div>
-                        <div className="layer-row-wrapper">
-                            <label className="layer-row" data-hidden={shadingVisible ? "false" : "true"}>
-                                <span className="layer-thumb" />
-                                <span className="layer-name">
-                                    <span className="layer-name-top">음영</span>
-                                    <span className="layer-share">원본 명암 겹침 · {shadingOpacity}%</span>
-                                </span>
-                                <input
-                                    type="checkbox"
-                                    checked={shadingVisible}
-                                    aria-label="음영 표시"
-                                    onChange={(e) => {
-                                        shadingVisibleRef.current = e.target.checked;
-                                        setShadingVisible(e.target.checked);
-                                    }}
-                                />
-                            </label>
-                            {shadingVisible && (
-                                <div className="layer-opacity-row">
-                                    <input
-                                        type="range"
-                                        min="0"
-                                        max="100"
-                                        value={shadingOpacity}
-                                        aria-label="음영 불투명도"
-                                        onChange={(e) => {
-                                            const val = Number(e.target.value);
-                                            shadingOpacityRef.current = val;
-                                            setShadingOpacity(val);
-                                        }}
-                                    />
-                                    <span>{shadingOpacity}%</span>
-                                </div>
-                            )}
-                        </div>
-                        {clusters
-                            .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
-                            .filter((item) => item.c?.rgb)
-                            .sort((a, b) => b.share - a.share || a.i - b.i)
-                            .map(({ c, i, share }, orderIndex) => {
-                                const hex = rgb01ToHex(c.rgb);
-                                const shown = colorVisible[i] !== false;
-                                const opacity = colorOpacity[i] ?? 100;
-                                const isModified = swatchEdited(c, i);
-                                return (
-                                    <div key={`${mode}-layer-${i}`} className="layer-row-wrapper">
-                                        <label className="layer-row" data-hidden={shown ? "false" : "true"}>
-                                            <span className="layer-num-badge">{orderIndex + 1}</span>
-                                            {layerImages[i] ? <img src={layerImages[i]} alt="" /> : <span className="layer-thumb" />}
-                                            <span className="layer-name">
-                                                <span className="layer-name-top">
-                                                    <input
-                                                        className="palette-swatch layer-dot"
-                                                        type="color"
-                                                        value={hex}
-                                                        aria-label={`${hex} 색상 수정`}
-                                                        onChange={(e) => handleColorChange(i, e)}
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        className="layer-hex"
-                                                        onClick={(e) => {
-                                                            e.preventDefault();
-                                                            copyToClipboard(hex);
-                                                        }}
-                                                    >
-                                                        {copiedHex === hex ? "복사됨" : hex}
-                                                    </button>
-                                                    {isModified && (
+                                </label>
+                                {shadingVisible && (
+                                    <div className="layer-opacity-row">
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={shadingOpacity}
+                                            aria-label="음영 불투명도"
+                                            onChange={(e) => {
+                                                const val = Number(e.target.value);
+                                                shadingOpacityRef.current = val;
+                                                setShadingOpacity(val);
+                                            }}
+                                        />
+                                        <span>{shadingOpacity}%</span>
+                                    </div>
+                                )}
+                            </div>
+                            {clusters
+                                .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
+                                .filter((item) => item.c?.rgb)
+                                .sort((a, b) => b.share - a.share || a.i - b.i)
+                                .map(({ c, i, share }, orderIndex) => {
+                                    const hex = rgb01ToHex(c.rgb);
+                                    const shown = colorVisible[i] !== false;
+                                    const opacity = colorOpacity[i] ?? 100;
+                                    const isModified = swatchEdited(c, i);
+                                    return (
+                                        <div key={`${mode}-layer-${i}`} className="layer-row-wrapper">
+                                            <label className="layer-row" data-hidden={shown ? "false" : "true"}>
+                                                <span className="layer-num-badge">{orderIndex + 1}</span>
+                                                {layerImages[i] ? <img src={layerImages[i]} alt="" /> : <span className="layer-thumb" />}
+                                                <span className="layer-name">
+                                                    <span className="layer-name-top">
+                                                        <input
+                                                            className="palette-swatch layer-dot"
+                                                            type="color"
+                                                            value={hex}
+                                                            aria-label={`${hex} 색상 수정`}
+                                                            onChange={(e) => handleColorChange(i, e)}
+                                                        />
                                                         <button
                                                             type="button"
-                                                            className="layer-reset-btn"
-                                                            title="원래 색상으로 초기화"
+                                                            className="layer-hex"
                                                             onClick={(e) => {
                                                                 e.preventDefault();
-                                                                resetSingleColor(i);
+                                                                copyToClipboard(hex);
                                                             }}
                                                         >
-                                                            ↺
+                                                            {copiedHex === hex ? "복사됨" : hex}
                                                         </button>
-                                                    )}
+                                                        {isModified && (
+                                                            <button
+                                                                type="button"
+                                                                className="layer-reset-btn"
+                                                                title="원래 색상으로 초기화"
+                                                                onClick={(e) => {
+                                                                    e.preventDefault();
+                                                                    resetSingleColor(i);
+                                                                }}
+                                                            >
+                                                                ↺
+                                                            </button>
+                                                        )}
+                                                    </span>
+                                                    <span className="layer-share">{share.toFixed(1)}% · {opacity}%</span>
                                                 </span>
-                                                <span className="layer-share">{share.toFixed(1)}% · {opacity}%</span>
-                                            </span>
-                                            <input
-                                                type="checkbox"
-                                                checked={shown}
-                                                aria-label={`${hex} 표시`}
-                                                onChange={(e) => {
-                                                    const checked = e.target.checked;
-                                                    setColorVisible((prev) => {
-                                                        const next = clusters.map((_, index) => prev[index] !== false);
-                                                        next[i] = checked;
-                                                        colorVisibleRef.current = next;
-                                                        return next;
-                                                    });
-                                                }}
-                                            />
-                                        </label>
-                                        {shown && (
-                                            <div className="layer-opacity-row">
                                                 <input
-                                                    type="range"
-                                                    min="0"
-                                                    max="100"
-                                                    value={opacity}
-                                                    aria-label={`${hex} 불투명도`}
+                                                    type="checkbox"
+                                                    checked={shown}
+                                                    aria-label={`${hex} 표시`}
                                                     onChange={(e) => {
-                                                        const val = Number(e.target.value);
-                                                        setColorOpacity((prev) => {
-                                                            const next = clusters.map((_, idx) => prev[idx] ?? 100);
-                                                            next[i] = val;
-                                                            colorOpacityRef.current = next;
+                                                        const checked = e.target.checked;
+                                                        setColorVisible((prev) => {
+                                                            const next = clusters.map((_, index) => prev[index] !== false);
+                                                            next[i] = checked;
+                                                            colorVisibleRef.current = next;
                                                             return next;
                                                         });
                                                     }}
                                                 />
-                                                <span>{opacity}%</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        <div className="layer-row-wrapper layer-row-bg-wrapper">
-                            <label className="layer-row layer-row-bg" data-hidden={bgVisible ? "false" : "true"}>
-                                <input
-                                    className="palette-swatch layer-dot"
-                                    type="color"
-                                    value={bgColor}
-                                    aria-label="배경 색상 변경"
-                                    onChange={(e) => {
-                                        bgColorRef.current = e.target.value;
-                                        setBgColor(e.target.value);
-                                    }}
-                                />
-                                <span className="layer-name">
-                                    <span className="layer-name-top">배경 색상</span>
-                                    <span className="layer-share">{bgColor.toUpperCase()}</span>
-                                </span>
-                                <input
-                                    type="checkbox"
-                                    checked={bgVisible}
-                                    aria-label="배경 색상 표시"
-                                    onChange={(e) => {
-                                        bgVisibleRef.current = e.target.checked;
-                                        setBgVisible(e.target.checked);
-                                    }}
-                                />
-                            </label>
+                                            </label>
+                                            {shown && (
+                                                <div className="layer-opacity-row">
+                                                    <input
+                                                        type="range"
+                                                        min="0"
+                                                        max="100"
+                                                        value={opacity}
+                                                        aria-label={`${hex} 불투명도`}
+                                                        onChange={(e) => {
+                                                            const val = Number(e.target.value);
+                                                            setColorOpacity((prev) => {
+                                                                const next = clusters.map((_, idx) => prev[idx] ?? 100);
+                                                                next[i] = val;
+                                                                colorOpacityRef.current = next;
+                                                                return next;
+                                                            });
+                                                        }}
+                                                    />
+                                                    <span>{opacity}%</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            <div className="layer-row-wrapper layer-row-bg-wrapper">
+                                <label className="layer-row layer-row-bg" data-hidden={bgVisible ? "false" : "true"}>
+                                    <input
+                                        className="palette-swatch layer-dot"
+                                        type="color"
+                                        value={bgColor}
+                                        aria-label="배경 색상 변경"
+                                        onChange={(e) => {
+                                            bgColorRef.current = e.target.value;
+                                            setBgColor(e.target.value);
+                                        }}
+                                    />
+                                    <span className="layer-name">
+                                        <span className="layer-name-top">배경 색상</span>
+                                        <span className="layer-share">{bgColor.toUpperCase()}</span>
+                                    </span>
+                                    <input
+                                        type="checkbox"
+                                        checked={bgVisible}
+                                        aria-label="배경 색상 표시"
+                                        onChange={(e) => {
+                                            bgVisibleRef.current = e.target.checked;
+                                            setBgVisible(e.target.checked);
+                                        }}
+                                    />
+                                </label>
+                            </div>
+                                </>
+                            )}
                         </div>
-                    </aside>
-                )}
+                    </details>
+                    <button
+                        type="button"
+                        className={`mode-tab study-entry${mode === "study" ? " mode-tab-active" : ""}`}
+                        aria-pressed={mode === "study"}
+                        onClick={() => switchMode("study")}
+                    >
+                        채색 공부
+                    </button>
+                    {mode !== "study" && (
+                        <p className="dock-aside-note">빛을 빼서 그림의 밑색을 봅니다.</p>
+                    )}
+                    {mode === "study" && (
+                        <details
+                            className="study-dock"
+                            open={studyOpen}
+                            onToggle={(event) => setStudyOpen(event.currentTarget.open)}
+                        >
+                            <summary className="dock-summary">
+                                <span className="layer-dock-title">채색 공부</span>
+                                <span className="dock-summary-hint">빛을 빼서 밑색을 봅니다</span>
+                            </summary>
+                            <StudyControls
+                                study={study}
+                                samples={SAMPLES}
+                                activeSampleId={activeSampleId}
+                                onOpenSample={openSample}
+                            />
+                        </details>
+                    )}
+                </aside>
             </div>
             </PreviewBoundary>
         </div>
