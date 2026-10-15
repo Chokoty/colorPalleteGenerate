@@ -7,41 +7,7 @@ import {
     layersToSvg,
     shouldUseWorker,
 } from "./svgTrace.js";
-
-const STUDY_ANALYSIS_SIDE = 640;
-
-function fitStudySide(width, height, maxSide) {
-    if (width <= maxSide && height <= maxSide) return { width, height };
-    const aspect = width / height;
-    if (width > height) {
-        return { width: maxSide, height: Math.max(1, Math.round(maxSide / aspect)) };
-    }
-    return { width: Math.max(1, Math.round(maxSide * aspect)), height: maxSide };
-}
-
-// 640 is the study analysis size. Full-frame k-means would block the page.
-function downscaleForTrace(data, width, height) {
-    const fitted = fitStudySide(width, height, STUDY_ANALYSIS_SIDE);
-    if (fitted.width === width && fitted.height === height) {
-        return { data, width, height };
-    }
-    const src = document.createElement("canvas");
-    src.width = width;
-    src.height = height;
-    src.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(data), width, height), 0, 0);
-    const dst = document.createElement("canvas");
-    dst.width = fitted.width;
-    dst.height = fitted.height;
-    const ctx = dst.getContext("2d", { willReadFrequently: true });
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(src, 0, 0, fitted.width, fitted.height);
-    return {
-        data: ctx.getImageData(0, 0, fitted.width, fitted.height).data,
-        width: fitted.width,
-        height: fitted.height,
-    };
-}
+import { downscaleRgba, STUDY_MAX_SIDE } from "./useColorStudy";
 import { ReplayChrome } from "./ui/ReplayChrome";
 import { strokeReplayStyle } from "./ui/strokeReplay";
 
@@ -181,7 +147,7 @@ export default function SvgPanel({
         let cancelled = false;
         const timer = setTimeout(() => {
             const inkMask = includeInk && ink ? inkMaskFromRgba(ink.rgba, ink.width, ink.height) : null;
-            const fitted = downscaleForTrace(image.data, image.width, image.height);
+            const fitted = downscaleRgba(image.data, image.width, image.height, STUDY_MAX_SIDE);
             const job = jobFromOriginal({
                 data: fitted.data,
                 width: fitted.width,

@@ -19,7 +19,7 @@ function fitInside(width, height, maxSide) {
     return { width: Math.max(1, Math.round(maxSide * aspect)), height: maxSide };
 }
 
-function downscaleRgba(data, width, height, maxSide) {
+export function downscaleRgba(data, width, height, maxSide) {
     const fitted = fitInside(width, height, maxSide);
     if (fitted.width === width && fitted.height === height) {
         return { data: new Uint8ClampedArray(data), width, height };
