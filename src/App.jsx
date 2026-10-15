@@ -10,6 +10,7 @@ import {
 import { contourMask, dilate, gradientEdges } from "./imageOutline";
 import { extractLineArt } from "./lineartModel";
 import { StudyControls, StudyLayers, StudyStage } from "./ColorStudy";
+import SvgPanel from "./SvgPanel";
 import { useColorStudy } from "./useColorStudy";
 
 // Main-branch extraction: the user picks k, and centers are k-means means
@@ -1402,7 +1403,7 @@ function App() {
                     )}
                 </aside>
 
-                <main className="panel panel-center">
+                <main className={`panel panel-center${centerTab === "svg" ? " svg-open" : ""}`}>
                     {!imageData && (
                         <div className="panel-placeholder">
                             {mode === "study"
@@ -1410,9 +1411,58 @@ function App() {
                                 : "이미지를 업로드하면 재색상 결과가 여기에 표시됩니다"}
                         </div>
                     )}
-                    {imageData && mode === "study" && <StudyStage study={study} />}
+                    {imageData && (
+                        <div className="mode-tabs image-tabs" role="tablist" aria-label="가운데 보기">
+                            {mode === "study" ? (
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={centerTab !== "svg"}
+                                    className={`mode-tab${centerTab !== "svg" ? " mode-tab-active" : ""}`}
+                                    onClick={() => setCenterTab("recolor")}
+                                >
+                                    채색
+                                </button>
+                            ) : (
+                                <>
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={centerTab === "recolor"}
+                                        className={`mode-tab${centerTab === "recolor" ? " mode-tab-active" : ""}`}
+                                        onClick={() => setCenterTab("recolor")}
+                                    >
+                                        재색상
+                                    </button>
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={centerTab === "original"}
+                                        className={`mode-tab${centerTab === "original" ? " mode-tab-active" : ""}`}
+                                        onClick={() => setCenterTab("original")}
+                                    >
+                                        원본
+                                    </button>
+                                </>
+                            )}
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={centerTab === "svg"}
+                                className={`mode-tab${centerTab === "svg" ? " mode-tab-active" : ""}`}
+                                onClick={() => setCenterTab("svg")}
+                            >
+                                SVG
+                            </button>
+                        </div>
+                    )}
+                    {imageData && mode === "study" && (
+                        <div hidden={centerTab === "svg"}>
+                            <StudyStage study={study} />
+                        </div>
+                    )}
                     {imageData && mode !== "study" && (
-                        <>
+                        <div hidden={centerTab === "svg"}>
                             {clusters.length > 0 && (
                                 <div className="palette-summary">
                                     <div style={{ fontSize: "22px", lineHeight: 1.2 }}>
@@ -1447,22 +1497,6 @@ function App() {
                                 {inkNote && <span className="header-toolbar-note">{inkNote}</span>}
                             </div>
                             <p className="app-header-hint">미리보기를 클릭하면 그 색이 팔레트에 더해집니다.</p>
-                            <div className="mode-tabs image-tabs">
-                                <button
-                                    type="button"
-                                    className={`mode-tab${centerTab === "recolor" ? " mode-tab-active" : ""}`}
-                                    onClick={() => setCenterTab("recolor")}
-                                >
-                                    재색상
-                                </button>
-                                <button
-                                    type="button"
-                                    className={`mode-tab${centerTab === "original" ? " mode-tab-active" : ""}`}
-                                    onClick={() => setCenterTab("original")}
-                                >
-                                    원본
-                                </button>
-                            </div>
                             <div className={`center-stage${isLandscape ? "" : " center-stage-portrait"}`}>
                                 <div className="stage-image-container">
                                     <div className="panel-image">
@@ -1484,7 +1518,26 @@ function App() {
                                 </div>
                             </div>
                             {isLandscape && clusters.length > 0 && renderShareBar("bottom")}
-                        </>
+                        </div>
+                    )}
+                    {imageData && (
+                        <div hidden={centerTab !== "svg"}>
+                            <SvgPanel
+                                active={centerTab === "svg"}
+                                uploadId={uploadId}
+                                mode={mode}
+                                image={imageRef.current}
+                                fileName={imageInfo?.name}
+                                clusters={clusters}
+                                clusterIds={clusterIdsRef.current}
+                                study={study.analysis}
+                                overrides={study.overrides}
+                                ink={showInk ? inkCacheRef.current?.art : null}
+                                inkNote={inkNote}
+                                includeInk={showInk}
+                                onIncludeInk={setShowInk}
+                            />
+                        </div>
                     )}
                 </main>
 

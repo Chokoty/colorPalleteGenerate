@@ -865,3 +865,240 @@ body {
     border: 1px solid rgba(255, 255, 255, 0.35);
     display: block;
 }
+
+.panel-center.svg-open {
+    max-width: 920px;
+}
+
+.svg-panel {
+    width: 100%;
+    text-align: left;
+    color: #222;
+}
+
+.svg-controls,
+.svg-transport,
+.svg-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    align-items: end;
+}
+
+.svg-controls label,
+.svg-transport label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1 1 140px;
+    min-width: 0;
+    font-size: 12px;
+    color: #333;
+}
+
+.svg-controls input[type="range"],
+.svg-transport input[type="range"] {
+    width: 100%;
+    accent-color: #3b82f6;
+}
+
+.svg-ink-toggle {
+    flex: 0 0 auto !important;
+    flex-direction: row !important;
+    align-items: center;
+    gap: 6px !important;
+    padding-bottom: 4px;
+}
+
+.svg-note {
+    margin: 8px 0 10px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: #666;
+}
+
+.svg-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(200px, 250px);
+    gap: 12px;
+    align-items: start;
+}
+
+.svg-stage {
+    position: relative;
+    min-width: 0;
+    background:
+        linear-gradient(45deg, #ececec 25%, transparent 25%),
+        linear-gradient(-45deg, #ececec 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #ececec 75%),
+        linear-gradient(-45deg, transparent 75%, #ececec 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    background-color: #f7f7f7;
+    border: 1px solid #e4e4e4;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.svg-drawing {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: min(68vh, 720px);
+    background: #fff;
+}
+
+.svg-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 280px;
+    padding: 16px;
+    color: #888;
+    font-size: 14px;
+    text-align: center;
+}
+
+.svg-busy {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(20, 20, 20, 0.78);
+    color: #fff;
+    font-size: 12px;
+}
+
+.svg-side {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    max-height: min(68vh, 720px);
+}
+
+.svg-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: #444;
+}
+
+.svg-layer-heading {
+    font-size: 12px;
+    font-weight: 700;
+    color: #333;
+}
+
+.svg-layer-list {
+    list-style: none;
+    margin: 0;
+    padding: 6px;
+    overflow: auto;
+    flex: 1 1 auto;
+    min-height: 140px;
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    background: #1c1c1c;
+    color: #f2f2f2;
+}
+
+.svg-layer-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px;
+    border-radius: 8px;
+    opacity: 0.45;
+}
+
+.svg-layer-list li[data-on="true"] {
+    opacity: 1;
+}
+
+.svg-layer-list li[data-current="true"] {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.svg-layer-index {
+    flex: 0 0 18px;
+    font-size: 11px;
+    color: #9a9a9a;
+    text-align: right;
+}
+
+.svg-layer-list i {
+    flex: 0 0 14px;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.svg-layer-copy {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.25;
+}
+
+.svg-layer-copy strong {
+    font-size: 12px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.svg-layer-copy em {
+    font-style: normal;
+    font-size: 11px;
+    color: #bdbdbd;
+}
+
+.svg-actions button,
+.svg-transport button {
+    border: 1px solid #ccc;
+    background: #fff;
+    color: #222;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+}
+
+.svg-actions button:disabled,
+.svg-transport button:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.svg-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.svg-actions button {
+    flex: 1 1 120px;
+}
+
+@media (max-width: 720px) {
+    .svg-body {
+        grid-template-columns: 1fr;
+    }
+
+    .svg-side {
+        max-height: none;
+    }
+
+    .svg-layer-list {
+        max-height: 240px;
+    }
+
+    .svg-drawing {
+        max-height: 58vh;
+    }
+}
