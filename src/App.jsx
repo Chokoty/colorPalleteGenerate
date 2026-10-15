@@ -9,9 +9,11 @@ import {
 } from "./imagePalette";
 import { contourMask, dilate, gradientEdges } from "./imageOutline";
 import { extractLineArt } from "./lineartModel";
-import { StudyControls, StudyLayers, StudyStage } from "./ColorStudy";
+import { StudyControls, StudyLayers, StudyStage, StudySummary, StudyTools } from "./ColorStudy";
 import SvgPanel from "./SvgPanel";
 import { useColorStudy } from "./useColorStudy";
+import { playClick, setClickSoundEnabled } from "./ui/clickSound";
+import { ReplayChrome } from "./ui/ReplayChrome";
 
 // Main-branch extraction: the user picks k, and centers are k-means means
 // of sampled RGB+XY points. Recolor fills each pixel with its center.
@@ -481,6 +483,16 @@ function App() {
     const manualCountRef = useRef(6);
     const modeRef = useRef("auto");
     const study = useColorStudy(imageRef, uploadId, mode === "study");
+    const [clickSound, setClickSound] = useState(() => {
+        try {
+            return localStorage.getItem("palette-click-sound") === "1";
+        } catch {
+            return false;
+        }
+    });
+    const [replayOpen, setReplayOpen] = useState(false);
+    const [replayMenu, setReplayMenu] = useState(false);
+    const [svgReplay, setSvgReplay] = useState(false);
 
     const updateCanvasAndLayers = (centers) => {
         const stored = imageRef.current;
@@ -1222,6 +1234,47 @@ function App() {
         }
     }, [clusters, isUpdating]);
 
+    useEffect(() => {
+        setClickSoundEnabled(clickSound);
+    }, [clickSound]);
+
+    useEffect(() => {
+        const onDown = (event) => {
+            if (event.button != null && event.button !== 0) return;
+            const el = event.target instanceof Element ? event.target.closest("button") : null;
+            if (!el || el.disabled || el.dataset.soundToggle != null) return;
+            playClick();
+        };
+        document.addEventListener("pointerdown", onDown, true);
+        return () => document.removeEventListener("pointerdown", onDown, true);
+    }, []);
+
+    const stageOpen = replayOpen || svgReplay;
+
+    useEffect(() => {
+        document.body.classList.toggle("replay-lock", stageOpen);
+        return () => document.body.classList.remove("replay-lock");
+    }, [stageOpen]);
+
+    useEffect(() => {
+        if (!imageData && stageOpen) {
+            setReplayOpen(false);
+            setReplayMenu(false);
+            setSvgReplay(false);
+        }
+    }, [imageData, stageOpen]);
+
+    useEffect(() => {
+        if (!replayOpen) return undefined;
+        const onKey = (event) => {
+            if (event.key !== "Escape") return;
+            if (replayMenu) setReplayMenu(false);
+            else setReplayOpen(false);
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [replayOpen, replayMenu]);
+
     const isLandscape = !imageInfo || imageInfo.width >= imageInfo.height;
     const shareBarItems = clusters
         .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
@@ -1242,20 +1295,177 @@ function App() {
         </div>
     );
 
+    const drawLabel =
+        centerTab === "svg" ? "SVG" : mode === "study" ? "STUDY" : centerTab === "original" ? "ORIGINAL" : "PALETTE";
+    const drawTime =
+        mode === "study"
+            ? study.analysis
+                ? `${study.analysis.ms}MS`
+                : ""
+            : recolorTime
+              ? `${recolorTime}MS`
+              : "";
+
+    const exitReplay = () => {
+        setReplayOpen(false);
+        setReplayMenu(false);
+    };
+
+    const openCenter = (id) => {
+        if (id === "svg") {
+            setReplayOpen(false);
+            setReplayMenu(false);
+        } else {
+            setSvgReplay(false);
+        }
+        setCenterTab(id);
+    };
+
+    const onReplayMenu = () => {
+        if (!imageData) return;
+        if (!replayOpen) {
+            setReplayOpen(true);
+            setReplayMenu(false);
+            return;
+        }
+        setReplayMenu((open) => !open);
+    };
+
+    const toggleClickSound = () => {
+        const next = !clickSound;
+        setClickSoundEnabled(next);
+        setClickSound(next);
+        try {
+            localStorage.setItem("palette-click-sound", next ? "1" : "0");
+        } catch {
+            /* ignore private browsing */
+        }
+        if (next) playClick();
+    };
+
+    const renderModeTabs = () => (
+        <div role="tablist" className="mode-tabs" aria-label="추출 방식">
+            {[
+                ["auto", "자동 추출"],
+                ["manual", "직접 설정"],
+                ["study", "채색 공부"],
+            ].map(([id, label]) => (
+                <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === id}
+                    onClick={() => switchMode(id)}
+                    className={`mode-tab${mode === id ? " mode-tab-active" : ""}`}
+                >
+                    {label}
+                </button>
+            ))}
+        </div>
+    );
+
+    const renderViewTabs = () => (
+        <div className="button-row" role="tablist" aria-label="가운데 보기">
+            {mode === "study" ? (
+                <button
+                    type="button"
+                    role="tab"
+                    aria-selected={centerTab !== "svg"}
+                    className={`mode-tab${centerTab !== "svg" ? " mode-tab-active" : ""}`}
+                    onClick={() => openCenter("recolor")}
+                >
+                    채색
+                </button>
+            ) : (
+                <>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={centerTab === "recolor"}
+                        className={`mode-tab${centerTab === "recolor" ? " mode-tab-active" : ""}`}
+                        onClick={() => openCenter("recolor")}
+                    >
+                        재색상
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={centerTab === "original"}
+                        className={`mode-tab${centerTab === "original" ? " mode-tab-active" : ""}`}
+                        onClick={() => openCenter("original")}
+                    >
+                        원본
+                    </button>
+                </>
+            )}
+            <button
+                type="button"
+                role="tab"
+                aria-selected={centerTab === "svg"}
+                className={`mode-tab${centerTab === "svg" ? " mode-tab-active" : ""}`}
+                onClick={() => openCenter("svg")}
+            >
+                SVG
+            </button>
+        </div>
+    );
+
+    const tools = (
+        <>
+            {replayOpen && renderModeTabs()}
+            {replayOpen && mode === "study" && (
+                <StudyControls study={study} onOpenSample={openStudySample} />
+            )}
+            {imageData && centerTab !== "svg" && renderViewTabs()}
+            {imageData && mode === "study" && centerTab !== "svg" && <StudyTools study={study} />}
+            {imageData && mode !== "study" && centerTab !== "svg" && (
+                <>
+                    <div className="button-row" role="toolbar" aria-label="미리보기 도구">
+                        <button
+                            type="button"
+                            className="mode-tab"
+                            aria-pressed={showLines}
+                            onClick={() => setShowLines((value) => !value)}
+                        >
+                            선 필터
+                        </button>
+                        <button
+                            type="button"
+                            className="mode-tab"
+                            aria-pressed={showInk}
+                            onClick={() => setShowInk((value) => !value)}
+                        >
+                            선화 추출
+                        </button>
+                        {inkNote && <span className="header-toolbar-note">{inkNote}</span>}
+                    </div>
+                    <p className="app-header-hint">미리보기를 클릭하면 그 색이 팔레트에 더해집니다.</p>
+                </>
+            )}
+            <div className="button-row">
+                <button
+                    type="button"
+                    className="mode-tab"
+                    aria-pressed={clickSound}
+                    data-sound-toggle=""
+                    onClick={toggleClickSound}
+                >
+                    클릭음
+                </button>
+            </div>
+        </>
+    );
+
     return (
-        <div
-            style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                minHeight: "100vh",
-            }}
-        >
-            {loadError && <p>{loadError}</p>}
+        <div className={`app${stageOpen ? " is-replay" : ""}`}>
+            {loadError && <p className="load-error">{loadError}</p>}
             <PreviewBoundary resetKey={uploadId}>
-            <div className="workspace">
+            <div className={`workspace${imageData ? " has-image" : ""}`}>
                 <aside className="panel panel-left">
-                    <h1 className="panel-title">컬러 팔레트 추출기</h1>
+                    <h1 className="panel-title">
+                        <span className="kicker">Palette</span>
+                        컬러 팔레트 추출기
+                    </h1>
                     <div
                         className={`drop-zone${dragActive ? " drop-zone-active" : ""}`}
                         onDragOver={(e) => {
@@ -1290,24 +1500,7 @@ function App() {
                             disabled={isLoadingImage}
                         />
                     </div>
-                    <div role="tablist" className="mode-tabs">
-                        {[
-                            ["auto", "자동 추출"],
-                            ["manual", "직접 설정"],
-                            ["study", "채색 공부"],
-                        ].map(([id, label]) => (
-                            <button
-                                key={id}
-                                type="button"
-                                role="tab"
-                                aria-selected={mode === id}
-                                onClick={() => switchMode(id)}
-                                className={`mode-tab${mode === id ? " mode-tab-active" : ""}`}
-                            >
-                                {label}
-                            </button>
-                        ))}
-                    </div>
+                    {renderModeTabs()}
                     {mode === "study" && (
                         <StudyControls study={study} onOpenSample={openStudySample} />
                     )}
@@ -1404,122 +1597,74 @@ function App() {
                 </aside>
 
                 <main className={`panel panel-center${centerTab === "svg" ? " svg-open" : ""}`}>
-                    {!imageData && (
-                        <div className="panel-placeholder">
-                            {mode === "study"
-                                ? "이미지를 업로드하면 밑색, 빛, 그림자로 나눠 보여줍니다"
-                                : "이미지를 업로드하면 재색상 결과가 여기에 표시됩니다"}
-                        </div>
-                    )}
-                    {imageData && (
-                        <div className="mode-tabs image-tabs" role="tablist" aria-label="가운데 보기">
-                            {mode === "study" ? (
-                                <button
-                                    type="button"
-                                    role="tab"
-                                    aria-selected={centerTab !== "svg"}
-                                    className={`mode-tab${centerTab !== "svg" ? " mode-tab-active" : ""}`}
-                                    onClick={() => setCenterTab("recolor")}
-                                >
-                                    채색
-                                </button>
-                            ) : (
-                                <>
-                                    <button
-                                        type="button"
-                                        role="tab"
-                                        aria-selected={centerTab === "recolor"}
-                                        className={`mode-tab${centerTab === "recolor" ? " mode-tab-active" : ""}`}
-                                        onClick={() => setCenterTab("recolor")}
-                                    >
-                                        재색상
-                                    </button>
-                                    <button
-                                        type="button"
-                                        role="tab"
-                                        aria-selected={centerTab === "original"}
-                                        className={`mode-tab${centerTab === "original" ? " mode-tab-active" : ""}`}
-                                        onClick={() => setCenterTab("original")}
-                                    >
-                                        원본
-                                    </button>
-                                </>
-                            )}
-                            <button
-                                type="button"
-                                role="tab"
-                                aria-selected={centerTab === "svg"}
-                                className={`mode-tab${centerTab === "svg" ? " mode-tab-active" : ""}`}
-                                onClick={() => setCenterTab("svg")}
-                            >
-                                SVG
-                            </button>
-                        </div>
-                    )}
-                    {imageData && mode === "study" && (
-                        <div hidden={centerTab === "svg"}>
-                            <StudyStage study={study} />
-                        </div>
-                    )}
-                    {imageData && mode !== "study" && (
-                        <div hidden={centerTab === "svg"}>
-                            {clusters.length > 0 && (
-                                <div className="palette-summary">
-                                    <div style={{ fontSize: "22px", lineHeight: 1.2 }}>
-                                        {clusters.length} swatches
-                                    </div>
-                                    {mode === "auto" && (
-                                        <div style={{ marginTop: "4px", fontSize: "15px", color: "#505050" }}>
-                                            stop ΔE {Math.round(deltaEStop)}
+                    <div hidden={centerTab === "svg"}>
+                        <ReplayChrome
+                            active={replayOpen && centerTab !== "svg"}
+                            menuOpen={replayMenu}
+                            onToggleMenu={onReplayMenu}
+                            onClose={exitReplay}
+                            disabled={!imageData}
+                            panel={replayOpen && replayMenu ? tools : null}
+                        >
+                            <div className="device">
+                                <div className="device-kicker">
+                                    <span>
+                                        Draw <strong>{drawLabel}</strong>
+                                    </span>
+                                    {drawTime && <span className="device-time">{drawTime}</span>}
+                                </div>
+                                <div className="device-meta">
+                                    {imageData && mode === "study" && <StudySummary study={study} />}
+                                    {imageData && mode !== "study" && clusters.length > 0 && (
+                                        <div className="palette-summary">
+                                            <div className="stat-count">{clusters.length} swatches</div>
+                                            {mode === "auto" && (
+                                                <div className="stat-sub">stop ΔE {Math.round(deltaEStop)}</div>
+                                            )}
+                                            {renderShareBar("top")}
+                                            {isUpdating && <p className="stat-sub">색상 변경 중...</p>}
                                         </div>
                                     )}
-                                    {renderShareBar("top")}
-                                    {isUpdating && <p>색상 변경 중...</p>}
                                 </div>
-                            )}
-                            <div className="header-toolbar">
-                                <label className="header-toolbar-check">
-                                    <input
-                                        type="checkbox"
-                                        checked={showLines}
-                                        onChange={(e) => setShowLines(e.target.checked)}
-                                    />
-                                    {" 선 필터"}
-                                </label>
-                                <label className="header-toolbar-check">
-                                    <input
-                                        type="checkbox"
-                                        checked={showInk}
-                                        onChange={(e) => setShowInk(e.target.checked)}
-                                    />
-                                    {" 선화 추출"}
-                                </label>
-                                {inkNote && <span className="header-toolbar-note">{inkNote}</span>}
-                            </div>
-                            <p className="app-header-hint">미리보기를 클릭하면 그 색이 팔레트에 더해집니다.</p>
-                            <div className={`center-stage${isLandscape ? "" : " center-stage-portrait"}`}>
-                                <div className="stage-image-container">
-                                    <div className="panel-image">
-                                        <canvas
-                                            ref={previewCanvasRef}
-                                            className="stage-canvas checker-bg"
-                                            style={{ display: centerTab === "recolor" ? "block" : "none" }}
-                                            onClick={addColorFromImage}
-                                            aria-label="미리보기"
-                                        />
-                                        <img
-                                            className="original-image checker-bg"
-                                            src={imageData}
-                                            alt="원본"
-                                            style={{ display: centerTab === "original" ? "block" : "none" }}
-                                        />
+                                <div className="device-stage">
+                                    <div className="device-frame">
+                                        {!imageData && (
+                                            <div className="panel-placeholder">
+                                                {mode === "study"
+                                                    ? "이미지를 업로드하면 밑색, 빛, 그림자로 나눠 보여줍니다"
+                                                    : "이미지를 업로드하면 재색상 결과가 여기에 표시됩니다"}
+                                            </div>
+                                        )}
+                                        {imageData && mode === "study" && <StudyStage study={study} />}
+                                        {imageData && mode !== "study" && (
+                                            <div className={`center-stage${isLandscape ? "" : " center-stage-portrait"}`}>
+                                                <div className="stage-image-container">
+                                                    <div className="panel-image">
+                                                        <canvas
+                                                            ref={previewCanvasRef}
+                                                            className="stage-canvas checker-bg"
+                                                            style={{ display: centerTab === "recolor" ? "block" : "none" }}
+                                                            onClick={addColorFromImage}
+                                                            aria-label="미리보기"
+                                                        />
+                                                        <img
+                                                            className="original-image checker-bg"
+                                                            src={imageData}
+                                                            alt="원본"
+                                                            style={{ display: centerTab === "original" ? "block" : "none" }}
+                                                        />
+                                                    </div>
+                                                    {!isLandscape && clusters.length > 0 && renderShareBar("portrait-side", true)}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
-                                    {!isLandscape && clusters.length > 0 && renderShareBar("portrait-side", true)}
+                                    {imageData && mode !== "study" && isLandscape && clusters.length > 0 && renderShareBar("bottom")}
                                 </div>
+                                {!replayOpen && <div className="device-controls">{tools}</div>}
                             </div>
-                            {isLandscape && clusters.length > 0 && renderShareBar("bottom")}
-                        </div>
-                    )}
+                        </ReplayChrome>
+                    </div>
                     {imageData && (
                         <div hidden={centerTab !== "svg"}>
                             <SvgPanel
@@ -1536,6 +1681,10 @@ function App() {
                                 inkNote={inkNote}
                                 includeInk={showInk}
                                 onIncludeInk={setShowInk}
+                                clickSound={clickSound}
+                                onToggleClickSound={toggleClickSound}
+                                onView={openCenter}
+                                onReplayActive={setSvgReplay}
                             />
                         </div>
                     )}

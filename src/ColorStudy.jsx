@@ -140,92 +140,54 @@ export function StudyControls({ study, onOpenSample }) {
     );
 }
 
-export function StudyStage({ study }) {
-    const canvasRef = useRef(null);
-    const dragRef = useRef(null);
+function studyHint(study) {
+    if (study.view === "compose") {
+        return "밑색 위에 그림자(Multiply)와 빛(Screen)을 겹친 결과입니다. 오른쪽 레이어에서 켜고 끄세요.";
+    }
+    if (study.view === "reverse") {
+        return `밑색에 빛 색 ${study.lightHex}을 Multiply로 곱한 색입니다. 나누기의 반대입니다.`;
+    }
+    if (study.scope === "brush") {
+        return "브러시로 칠한 픽셀만 빛 색으로 나눕니다. 구분선 왼쪽은 원본입니다.";
+    }
+    return "구분선 왼쪽은 원본, 오른쪽은 빛 색을 나눈 결과입니다. 스포이드로 빛 틴트를 집으세요.";
+}
 
-    useEffect(() => {
-        paintStudyCanvas(canvasRef.current, study);
-    }, [study]);
-
-    const size = study.analysis;
-
-    const onPointerDown = (event) => {
-        if (!size) return;
-        const point = bitmapPoint(event, event.currentTarget, size.width, size.height);
-        event.currentTarget.setPointerCapture(event.pointerId);
-        if (study.tool === "pick") {
-            dragRef.current = point;
-            return;
-        }
-        dragRef.current = null;
-        study.paintMask(point.x, point.y);
-    };
-
-    const onPointerMove = (event) => {
-        if (!size || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
-        const point = bitmapPoint(event, event.currentTarget, size.width, size.height);
-        if (study.tool === "pick") {
-            if (dragRef.current) dragRef.current.end = point;
-            return;
-        }
-        study.paintMask(point.x, point.y);
-    };
-
-    const onPointerUp = (event) => {
-        if (!size) return;
-        const point = bitmapPoint(event, event.currentTarget, size.width, size.height);
-        if (study.tool === "pick" && dragRef.current) {
-            const start = dragRef.current;
-            const end = start.end ?? point;
-            study.pickLight(start.x, start.y, end.x, end.y);
-        } else if (study.tool !== "pick") {
-            study.commitMask();
-        }
-        dragRef.current = null;
-    };
-
-    const hint =
-        study.view === "compose"
-            ? "밑색 위에 그림자(Multiply)와 빛(Screen)을 겹친 결과입니다. 오른쪽 레이어에서 켜고 끄세요."
-            : study.view === "reverse"
-              ? `밑색에 빛 색 ${study.lightHex}을 Multiply로 곱한 색입니다. 나누기의 반대입니다.`
-              : study.scope === "brush"
-                ? "브러시로 칠한 픽셀만 빛 색으로 나눕니다. 구분선 왼쪽은 원본입니다."
-                : "구분선 왼쪽은 원본, 오른쪽은 빛 색을 나눈 결과입니다. 스포이드로 빛 틴트를 집으세요.";
-
+export function StudySummary({ study }) {
+    if (!study.analysis) return null;
     return (
-        <>
-            {study.analysis && (
-                <div className="palette-summary">
-                    <div style={{ fontSize: "22px", lineHeight: 1.2 }}>
-                        {study.analysis.bases.length} base colors
-                    </div>
-                    <div style={{ marginTop: "4px", fontSize: "15px", color: "#505050" }}>
-                        분해 {study.analysis.ms}ms
-                        {study.analysis.bases.length < study.baseCount
-                            ? ` · 최대 ${study.baseCount} 중 색이 더 갈라지지 않음`
-                            : ""}
-                    </div>
-                    <div className="palette-share-bar" aria-hidden="true">
-                        {study.analysis.bases
-                            .map((base, index) => ({ base, index }))
-                            .sort((a, b) => a.base.share - b.base.share || a.index - b.index)
-                            .map(({ base, index }) => (
-                                <span
-                                    key={`study-share-${index}`}
-                                    style={{
-                                        flex: `${Math.max(base.share, 2)} 1 0`,
-                                        background: study.overrides[index]
-                                            ? rgb255ToHex(study.overrides[index])
-                                            : base.hex,
-                                    }}
-                                />
-                            ))}
-                    </div>
-                </div>
-            )}
-            <div className="mode-tabs image-tabs" role="tablist" aria-label="채색 공부 보기">
+        <div className="palette-summary">
+            <div className="stat-count">{study.analysis.bases.length} base colors</div>
+            <div className="stat-sub">
+                분해 {study.analysis.ms}ms
+                {study.analysis.bases.length < study.baseCount
+                    ? ` · 최대 ${study.baseCount} 중 색이 더 갈라지지 않음`
+                    : ""}
+            </div>
+            <div className="palette-share-bar" aria-hidden="true">
+                {study.analysis.bases
+                    .map((base, index) => ({ base, index }))
+                    .sort((a, b) => a.base.share - b.base.share || a.index - b.index)
+                    .map(({ base, index }) => (
+                        <span
+                            key={`study-share-${index}`}
+                            style={{
+                                flex: `${Math.max(base.share, 2)} 1 0`,
+                                background: study.overrides[index]
+                                    ? rgb255ToHex(study.overrides[index])
+                                    : base.hex,
+                            }}
+                        />
+                    ))}
+            </div>
+        </div>
+    );
+}
+
+export function StudyTools({ study }) {
+    return (
+        <div className="study-tools">
+            <div className="button-row" role="tablist" aria-label="채색 공부 보기">
                 {[
                     ["divide", "나누기"],
                     ["compose", "재구성"],
@@ -243,25 +205,7 @@ export function StudyStage({ study }) {
                     </button>
                 ))}
             </div>
-            <p className="app-header-hint">{hint}</p>
-            <div className="center-stage">
-                <div className="stage-image-container">
-                    <div className="panel-image">
-                        {!study.analysis ? (
-                            <div className="panel-placeholder">분해하는 중</div>
-                        ) : (
-                            <canvas
-                                ref={canvasRef}
-                                className="stage-canvas checker-bg"
-                                aria-label="채색 공부 미리보기"
-                                onPointerDown={onPointerDown}
-                                onPointerMove={onPointerMove}
-                                onPointerUp={onPointerUp}
-                            />
-                        )}
-                    </div>
-                </div>
-            </div>
+            <p className="app-header-hint">{studyHint(study)}</p>
             {study.view === "divide" && study.analysis && (
                 <label className="study-compare">
                     <span>원본</span>
@@ -327,7 +271,74 @@ export function StudyStage({ study }) {
                     />
                 </label>
             </div>
-        </>
+        </div>
+    );
+}
+
+export function StudyStage({ study }) {
+    const canvasRef = useRef(null);
+    const dragRef = useRef(null);
+
+    useEffect(() => {
+        paintStudyCanvas(canvasRef.current, study);
+    }, [study]);
+
+    const size = study.analysis;
+
+    const onPointerDown = (event) => {
+        if (!size) return;
+        const point = bitmapPoint(event, event.currentTarget, size.width, size.height);
+        event.currentTarget.setPointerCapture(event.pointerId);
+        if (study.tool === "pick") {
+            dragRef.current = point;
+            return;
+        }
+        dragRef.current = null;
+        study.paintMask(point.x, point.y);
+    };
+
+    const onPointerMove = (event) => {
+        if (!size || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+        const point = bitmapPoint(event, event.currentTarget, size.width, size.height);
+        if (study.tool === "pick") {
+            if (dragRef.current) dragRef.current.end = point;
+            return;
+        }
+        study.paintMask(point.x, point.y);
+    };
+
+    const onPointerUp = (event) => {
+        if (!size) return;
+        const point = bitmapPoint(event, event.currentTarget, size.width, size.height);
+        if (study.tool === "pick" && dragRef.current) {
+            const start = dragRef.current;
+            const end = start.end ?? point;
+            study.pickLight(start.x, start.y, end.x, end.y);
+        } else if (study.tool !== "pick") {
+            study.commitMask();
+        }
+        dragRef.current = null;
+    };
+
+    return (
+        <div className="center-stage">
+            <div className="stage-image-container">
+                <div className="panel-image">
+                    {!study.analysis ? (
+                        <div className="panel-placeholder">분해하는 중</div>
+                    ) : (
+                        <canvas
+                            ref={canvasRef}
+                            className="stage-canvas checker-bg"
+                            aria-label="채색 공부 미리보기"
+                            onPointerDown={onPointerDown}
+                            onPointerMove={onPointerMove}
+                            onPointerUp={onPointerUp}
+                        />
+                    )}
+                </div>
+            </div>
+        </div>
     );
 }
 

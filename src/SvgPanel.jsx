@@ -8,6 +8,8 @@ import {
     layersToSvg,
     shouldUseWorker,
 } from "./svgTrace.js";
+import { ReplayChrome } from "./ui/ReplayChrome";
+import { strokeReplayStyle } from "./ui/strokeReplay";
 
 function formatBytes(bytes) {
     if (!Number.isFinite(bytes)) return "";
@@ -79,6 +81,10 @@ export default function SvgPanel({
     inkNote,
     includeInk,
     onIncludeInk,
+    clickSound = false,
+    onToggleClickSound,
+    onView,
+    onReplayActive,
 }) {
     const [detail, setDetail] = useState(64);
     const [colorCount, setColorCount] = useState(8);
@@ -87,6 +93,9 @@ export default function SvgPanel({
     const [status, setStatus] = useState("idle");
     const [playing, setPlaying] = useState(false);
     const [shown, setShown] = useState(0);
+    const [replayOpen, setReplayOpen] = useState(false);
+    const [menuOpen, setMenuOpen] = useState(false);
+    const [reduceMotion, setReduceMotion] = useState(false);
     const touched = useRef(false);
     const runId = useRef(0);
 
@@ -107,7 +116,44 @@ export default function SvgPanel({
         setShown(0);
         setPlaying(false);
         setStatus("idle");
+        setReplayOpen(false);
+        setMenuOpen(false);
     }, [uploadId, mode]);
+
+    useEffect(() => {
+        const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+        const apply = () => setReduceMotion(media.matches);
+        apply();
+        media.addEventListener("change", apply);
+        return () => media.removeEventListener("change", apply);
+    }, []);
+
+    useEffect(() => {
+        onReplayActive?.(replayOpen);
+    }, [replayOpen, onReplayActive]);
+
+    useEffect(() => {
+        if (active) return;
+        setReplayOpen(false);
+        setMenuOpen(false);
+    }, [active]);
+
+    useEffect(() => {
+        if (picture?.layers.length) return;
+        setReplayOpen(false);
+        setMenuOpen(false);
+    }, [picture]);
+
+    useEffect(() => {
+        if (!replayOpen) return undefined;
+        const onKey = (event) => {
+            if (event.key !== "Escape") return;
+            if (menuOpen) setMenuOpen(false);
+            else setReplayOpen(false);
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [replayOpen, menuOpen]);
 
     useEffect(() => {
         if (!active || !image?.width) return undefined;
@@ -196,10 +242,7 @@ export default function SvgPanel({
             setPlaying(false);
             return;
         }
-        const reduce =
-            typeof window !== "undefined" &&
-            window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        if (reduce) {
+        if (reduceMotion) {
             setShown(picture.layers.length);
             setPlaying(false);
             return;
@@ -222,8 +265,93 @@ export default function SvgPanel({
 
     const playLabel = playing ? "일시정지" : shown > 0 && shown < layerCount ? "이어 그리기" : "그리기";
 
-    return (
-        <section className="svg-panel" aria-label="SVG">
+    const leave = (id) => {
+        setReplayOpen(false);
+        setMenuOpen(false);
+        onView?.(id);
+    };
+
+    const onToggleMenu = () => {
+        if (!picture?.layers.length) return;
+        if (!replayOpen) {
+            setReplayOpen(true);
+            setMenuOpen(false);
+            return;
+        }
+        setMenuOpen((open) => !open);
+    };
+
+    const drawing = picture?.layers.length ? (
+        <svg
+            className="svg-drawing replay-drawing"
+            viewBox={`0 0 ${picture.width} ${picture.height}`}
+            role="img"
+            aria-label="SVG 드로잉"
+        >
+            {picture.layers.map((layer, index) => {
+                const on = index < shown;
+                if (layer.kind === "stroke") {
+                    return (
+                        <g key={layer.id} opacity={on ? 1 : 0}>
+                            {layer.d.map((d, pathIndex) => (
+                                <path
+                                    key={`${layer.id}-${pathIndex}`}
+                                    className="replay-stroke"
+                                    d={d}
+                                    fill="none"
+                                    stroke={layer.hex}
+                                    strokeWidth={layer.strokeWidth}
+                                    style={strokeReplayStyle(layer.lengths[pathIndex], on, drawMs, reduceMotion)}
+                                />
+                            ))}
+                        </g>
+                    );
+                }
+                return (
+                    <path
+                        key={layer.id}
+                        d={layer.d}
+                        fill={layer.hex}
+                        fillRule="evenodd"
+                        style={{
+                            opacity: on ? 1 : 0,
+                            transition: on && !reduceMotion ? `opacity ${fadeMs}ms ease` : "none",
+                        }}
+                    />
+                );
+            })}
+        </svg>
+    ) : (
+        <div className="svg-empty">
+            {status === "error"
+                ? "SVG로 만들지 못했습니다."
+                : status === "tracing" || status === "wait"
+                  ? "벡터로 만드는 중"
+                  : "색이 준비되면 여기에 SVG가 나타납니다."}
+        </div>
+    );
+
+    const controls = (
+        <>
+            <div className="button-row" role="tablist" aria-label="가운데 보기">
+                {mode === "study" ? (
+                    <button type="button" role="tab" className="mode-tab" onClick={() => leave("recolor")}>
+                        채색
+                    </button>
+                ) : (
+                    <>
+                        <button type="button" role="tab" className="mode-tab" onClick={() => leave("recolor")}>
+                            재색상
+                        </button>
+                        <button type="button" role="tab" className="mode-tab" onClick={() => leave("original")}>
+                            원본
+                        </button>
+                    </>
+                )}
+                <button type="button" role="tab" className="mode-tab mode-tab-active" aria-selected="true">
+                    SVG
+                </button>
+            </div>
             <div className="svg-controls">
                 <label>
                     디테일 {detail}
@@ -251,131 +379,113 @@ export default function SvgPanel({
                         }}
                     />
                 </label>
-                <label className="svg-ink-toggle">
-                    <input
-                        type="checkbox"
-                        checked={includeInk}
-                        onChange={(event) => onIncludeInk(event.target.checked)}
-                    />
+                <button
+                    type="button"
+                    className="mode-tab"
+                    aria-pressed={includeInk}
+                    onClick={() => onIncludeInk(!includeInk)}
+                >
                     선화
-                </label>
+                </button>
             </div>
             <p className="svg-note">
                 큰 밑색, 그림자, 빛, 작은 디테일, 선화 순으로 쌓습니다. 디테일은 경로를 단순하게 하고 작은 덩어리를 걷어냅니다.
                 {inkNote ? ` ${inkNote}` : ""}
             </p>
-            <div className="svg-body">
-                <div className="svg-stage">
-                    {picture?.layers.length ? (
-                        <svg
-                            className="svg-drawing"
-                            viewBox={`0 0 ${picture.width} ${picture.height}`}
-                            role="img"
-                            aria-label="SVG 드로잉"
-                        >
-                            {picture.layers.map((layer, index) => {
-                                const on = index < shown;
-                                if (layer.kind === "stroke") {
-                                    return (
-                                        <g key={layer.id} opacity={on ? 1 : 0}>
-                                            {layer.d.map((d, pathIndex) => (
-                                                <path
-                                                    key={`${layer.id}-${pathIndex}`}
-                                                    d={d}
-                                                    fill="none"
-                                                    stroke={layer.hex}
-                                                    strokeWidth={layer.strokeWidth}
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                    style={{
-                                                        strokeDasharray: layer.lengths[pathIndex],
-                                                        strokeDashoffset: on ? 0 : layer.lengths[pathIndex],
-                                                        transition: on
-                                                            ? `stroke-dashoffset ${drawMs}ms ease`
-                                                            : "none",
-                                                    }}
-                                                />
-                                            ))}
-                                        </g>
-                                    );
-                                }
-                                return (
-                                    <path
-                                        key={layer.id}
-                                        d={layer.d}
-                                        fill={layer.hex}
-                                        fillRule="evenodd"
-                                        style={{
-                                            opacity: on ? 1 : 0,
-                                            transition: on ? `opacity ${fadeMs}ms ease` : "none",
-                                        }}
-                                    />
-                                );
-                            })}
-                        </svg>
-                    ) : (
-                        <div className="svg-empty">
-                            {status === "error"
-                                ? "SVG로 만들지 못했습니다."
-                                : status === "tracing" || status === "wait"
-                                  ? "벡터로 만드는 중"
-                                  : "색이 준비되면 여기에 SVG가 나타납니다."}
-                        </div>
-                    )}
-                    {status === "tracing" && picture && <div className="svg-busy">벡터로 만드는 중</div>}
-                </div>
-                <div className="svg-side">
-                    <div className="svg-meta">
-                        <span>경로 {picture?.pathCount ?? 0}</span>
-                        <span>{picture ? formatBytes(picture.bytes) : "—"}</span>
-                        {picture?.ms != null && <span>{picture.ms}ms</span>}
-                    </div>
-                    <div className="svg-transport">
-                        <button type="button" onClick={togglePlay} disabled={!layerCount} aria-pressed={playing}>
-                            {playLabel}
-                        </button>
-                        <label>
-                            속도 {speed.toFixed(1)}×
-                            <input
-                                type="range"
-                                min="0.5"
-                                max="3"
-                                step="0.1"
-                                value={speed}
-                                aria-label="재생 속도"
-                                onChange={(event) => setSpeed(Number(event.target.value))}
-                            />
-                        </label>
-                    </div>
-                    <div className="svg-actions">
-                        <button type="button" onClick={() => save(false)} disabled={!layerCount}>
-                            SVG 저장
-                        </button>
-                        <button type="button" onClick={() => save(true)} disabled={!layerCount}>
-                            애니메이션 SVG
-                        </button>
-                    </div>
-                    <div className="svg-layer-heading">그리는 순서</div>
-                    <ol className="svg-layer-list" aria-label="SVG 레이어">
-                        {(picture?.layers || []).map((layer, index) => (
-                            <li
-                                key={layer.id}
-                                data-on={index < shown ? "true" : "false"}
-                                data-current={playing && index === shown - 1 ? "true" : "false"}
-                            >
-                                <span className="svg-layer-index">{index + 1}</span>
-                                <i style={{ background: layer.hex }} />
-                                <span className="svg-layer-copy">
-                                    <strong>{layer.name}</strong>
-                                    <em>
-                                        {layer.kind === "stroke" ? "획" : "면"} · {layer.paths.length}
-                                    </em>
-                                </span>
-                            </li>
-                        ))}
-                    </ol>
-                </div>
+            <div className="svg-transport">
+                <button type="button" className="mode-tab" onClick={togglePlay} disabled={!layerCount} aria-pressed={playing}>
+                    {playLabel}
+                </button>
+                <label>
+                    속도 {speed.toFixed(1)}×
+                    <input
+                        type="range"
+                        min="0.5"
+                        max="3"
+                        step="0.1"
+                        value={speed}
+                        aria-label="재생 속도"
+                        onChange={(event) => setSpeed(Number(event.target.value))}
+                    />
+                </label>
             </div>
+            <div className="svg-actions">
+                <button type="button" className="mode-tab" onClick={() => save(false)} disabled={!layerCount}>
+                    SVG 저장
+                </button>
+                <button type="button" className="mode-tab" onClick={() => save(true)} disabled={!layerCount}>
+                    애니메이션 SVG
+                </button>
+            </div>
+            <div className="svg-meta">
+                <span>경로 {picture?.pathCount ?? 0}</span>
+                <span>{picture ? formatBytes(picture.bytes) : "—"}</span>
+                {picture?.ms != null && <span>{picture.ms}ms</span>}
+            </div>
+            <div className="svg-layer-heading">그리는 순서</div>
+            <ol className="svg-layer-list" aria-label="SVG 레이어">
+                {(picture?.layers || []).map((layer, index) => (
+                    <li
+                        key={layer.id}
+                        data-on={index < shown ? "true" : "false"}
+                        data-current={playing && index === shown - 1 ? "true" : "false"}
+                    >
+                        <span className="svg-layer-index">{index + 1}</span>
+                        <i style={{ background: layer.hex }} />
+                        <span className="svg-layer-copy">
+                            <strong>{layer.name}</strong>
+                            <em>
+                                {layer.kind === "stroke" ? "획" : "면"} · {layer.paths.length}
+                            </em>
+                        </span>
+                    </li>
+                ))}
+            </ol>
+            {onToggleClickSound && (
+                <div className="button-row">
+                    <button
+                        type="button"
+                        className="mode-tab"
+                        aria-pressed={clickSound}
+                        data-sound-toggle=""
+                        onClick={onToggleClickSound}
+                    >
+                        클릭음
+                    </button>
+                </div>
+            )}
+        </>
+    );
+
+    return (
+        <section className="svg-panel" aria-label="SVG">
+            <ReplayChrome
+                active={replayOpen}
+                menuOpen={menuOpen}
+                onToggleMenu={onToggleMenu}
+                onClose={() => {
+                    setReplayOpen(false);
+                    setMenuOpen(false);
+                }}
+                disabled={!replayOpen && !picture?.layers.length}
+                panel={replayOpen && menuOpen ? controls : null}
+            >
+                <div className="device svg-device">
+                    <div className="device-kicker">
+                        <span>
+                            Draw <strong>SVG</strong>
+                        </span>
+                        {picture?.ms != null && <span className="device-time">{picture.ms}MS</span>}
+                    </div>
+                    <div className="device-stage">
+                        <div className="device-frame svg-stage">
+                            {drawing}
+                            {status === "tracing" && picture && <div className="svg-busy">벡터로 만드는 중</div>}
+                        </div>
+                    </div>
+                    {!replayOpen && <div className="device-controls">{controls}</div>}
+                </div>
+            </ReplayChrome>
         </section>
     );
 }
