@@ -153,7 +153,25 @@ test("parseSvgPaths keeps the tracer d and fill", () => {
     const paths = parseSvgPaths(`<svg><path d="M0 0 C1 1 2 2 3 3 Z" fill="#ff00aa" transform="translate(0,0)"/></svg>`);
     assert.equal(paths.length, 1);
     assert.equal(paths[0].fill, "#ff00aa");
-    assert.match(paths[0].d, /C/);
+    assert.equal(paths[0].d, "M0 0 C1 1 2 2 3 3 Z");
+});
+
+test("parseSvgPaths keeps a vtracer shape at its translate", () => {
+    const local =
+        "M0 0 C4.95 0 9.9 0 15 0 C15 6.27 15 12.54 15 19 C10.05 19 5.1 19 0 19 C0 12.73 0 6.46 0 0 Z";
+    const paths = parseSvgPaths(
+        `<svg><path d="${local}" fill="#F0C828" transform="translate(41,9)"/></svg>`
+    );
+    assert.equal(paths.length, 1);
+    assert.equal(paths[0].fill, "#F0C828");
+    assert.match(paths[0].d, /^M41 9\b/);
+    assert.match(paths[0].d, /\b56 9\b/);
+    assert.doesNotMatch(paths[0].d, /^M0 0\b/);
+});
+
+test("parseSvgPaths shifts only absolute points", () => {
+    const paths = parseSvgPaths(`<svg><path d="M0 0 l10 4 Z" fill="#111111" transform="translate(5,6)"/></svg>`);
+    assert.equal(paths[0].d, "M5 6 l10 4 Z");
 });
 
 test("vtracer spline stacked traces two colors as curves", async () => {
@@ -177,4 +195,25 @@ test("vtracer spline stacked traces two colors as curves", async () => {
     const fills = flat.paths.map((path) => path.fill.toLowerCase());
     assert.ok(fills.some((fill) => fill.startsWith("#d") || fill.startsWith("#e") || fill.startsWith("#c")));
     assert.ok(fills.some((fill) => fill.includes("c") || fill.startsWith("#2") || fill.startsWith("#3")));
+});
+
+test("a vtracer swatch keeps the translate baked into its origin", async () => {
+    const wasm = readFileSync(new URL("../node_modules/vtracer-wasm/vtracer.wasm", import.meta.url));
+    const traceSvg = asTraceFn(await loadVtracer(wasm));
+    const width = 64;
+    const height = 40;
+    const data = solid(width, height, (x, y) => {
+        if (x > 40 && x < 56 && y > 8 && y < 28) return [240, 200, 40];
+        return x < 24 ? [40, 80, 180] : [220, 60, 70];
+    });
+    const svg = await traceSvg(
+        data,
+        width,
+        height,
+        vtracerConfig({ ...traceTuning(64), binary: false, colorPrecision: 6, layerDifference: 8 })
+    );
+    assert.match(svg, /transform="translate\(41,9\)"/);
+    const yellow = parseSvgPaths(svg).find((path) => path.fill.toLowerCase() === "#f0c828");
+    assert.ok(yellow);
+    assert.match(yellow.d, /^M41 9\b/);
 });

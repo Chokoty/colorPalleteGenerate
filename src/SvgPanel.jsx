@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { constructionOpacity, drawnToSvg, TRACE_MAX_SIDE } from "./drawnTrace.js";
+import { constructionOpacity, drawnToSvg, measureError, TRACE_MAX_SIDE } from "./drawnTrace.js";
 import { inkMaskFromRgba } from "./svgTrace.js";
 import { downscaleRgba } from "./useColorStudy";
 import { ReplayChrome } from "./ui/ReplayChrome";
@@ -96,7 +96,9 @@ export default function SvgPanel({
     const [replayOpen, setReplayOpen] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
     const [reduceMotion, setReduceMotion] = useState(false);
+    const [renderedError, setRenderedError] = useState(null);
     const runId = useRef(0);
+    const drawingRef = useRef(null);
 
     useEffect(() => {
         setColorCount(8);
@@ -107,6 +109,7 @@ export default function SvgPanel({
         setShown(0);
         setPlaying(false);
         setStatus("idle");
+        setRenderedError(null);
         setReplayOpen(false);
         setMenuOpen(false);
     }, [uploadId]);
@@ -196,6 +199,39 @@ export default function SvgPanel({
         };
     }, [active, image, uploadId, detail, colorCount, ink, includeInk]);
 
+    useEffect(() => {
+        if (!picture || !image?.data || shown < picture.layers.length) return undefined;
+        const node = drawingRef.current;
+        if (!node) return undefined;
+        let cancelled = false;
+        const fitted = downscaleRgba(image.data, image.width, image.height, TRACE_MAX_SIDE);
+        if (fitted.width !== picture.width || fitted.height !== picture.height) return undefined;
+        const clone = node.cloneNode(true);
+        clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+        clone.setAttribute("width", String(picture.width));
+        clone.setAttribute("height", String(picture.height));
+        const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(clone)], { type: "image/svg+xml" }));
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement("canvas");
+            canvas.width = picture.width;
+            canvas.height = picture.height;
+            const ctx = canvas.getContext("2d", { willReadFrequently: true });
+            ctx.drawImage(img, 0, 0, picture.width, picture.height);
+            const traced = ctx.getImageData(0, 0, picture.width, picture.height).data;
+            URL.revokeObjectURL(url);
+            if (!cancelled) setRenderedError(measureError(fitted.data, traced));
+        };
+        img.onerror = () => {
+            URL.revokeObjectURL(url);
+        };
+        img.src = url;
+        return () => {
+            cancelled = true;
+            URL.revokeObjectURL(url);
+        };
+    }, [picture, image, shown]);
+
     const fadeMs = Math.max(90, Math.round(420 / speed));
     const drawMs = Math.max(140, Math.round(980 / speed));
     const layerCount = picture?.layers.length || 0;
@@ -255,6 +291,7 @@ export default function SvgPanel({
 
     const drawing = picture?.layers.length ? (
         <svg
+            ref={drawingRef}
             className="svg-drawing replay-drawing"
             viewBox={`0 0 ${picture.width} ${picture.height}`}
             role="img"
@@ -390,9 +427,9 @@ export default function SvgPanel({
                 <span>경로 {picture?.pathCount ?? 0}</span>
                 <span>{picture ? formatBytes(picture.bytes) : "—"}</span>
                 {picture?.ms != null && <span>{picture.ms}ms</span>}
-                {picture?.batches?.length ? (
-                    <span>
-                        MAE {picture.batches.at(-1).mae.toFixed(2)} · {picture.batches.at(-1).psnr.toFixed(1)} dB
+                {renderedError ? (
+                    <span data-mae-source="rendered-svg">
+                        MAE {renderedError.mae.toFixed(2)} · {renderedError.psnr.toFixed(1)} dB
                     </span>
                 ) : null}
             </div>
