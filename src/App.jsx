@@ -7,14 +7,13 @@ import {
     recolorPixel,
     rgbToLab,
 } from "./imagePalette";
-import { contourMask, dilate, gradientEdges } from "./imageOutline";
+import { gradientEdges } from "./imageOutline";
 import { extractLineArt } from "./lineartModel";
 import { StudyControls, StudyLayers, StudyStage, StudySummary, StudyTools } from "./ColorStudy";
 import { StartGuide } from "./StartGuide";
 import { DEFAULT_SAMPLE, SAMPLES } from "./samples";
 import SvgPanel from "./SvgPanel";
 import { useColorStudy } from "./useColorStudy";
-import { playClick, setClickSoundEnabled } from "./ui/clickSound";
 import { ReplayChrome } from "./ui/ReplayChrome";
 import { addPick, centersWithPicks, pickAt, removePick, restorePicks, rgb01ToHex } from "./pickedColors";
 
@@ -426,10 +425,8 @@ function App() {
     const [deltaEStop, setDeltaEStop] = useState(DELTA_E_STOP);
     const [showConvexHull, setShowConvexHull] = useState(true);
     const [showLines, setShowLines] = useState(false);
-    const [showInk, setShowInk] = useState(false);
     const [inkNote, setInkNote] = useState("");
     const [dragActive, setDragActive] = useState(false);
-    const [showContourLayer, setShowContourLayer] = useState(false);
     const [shadingVisible, setShadingVisible] = useState(false);
     const [lineArtVisible, setLineArtVisible] = useState(true);
     const [colorVisible, setColorVisible] = useState([]);
@@ -438,10 +435,10 @@ function App() {
     const [bgVisible, setBgVisible] = useState(true);
     const [colorOpacity, setColorOpacity] = useState([]);
     const [lineArtOpacity, setLineArtOpacity] = useState(100);
-    const [contourOpacity, setContourOpacity] = useState(100);
     const [shadingOpacity, setShadingOpacity] = useState(100);
-    const [contourThumb, setContourThumb] = useState(null);
+    const [lineThumb, setLineThumb] = useState(null);
     const [lineArtThumb, setLineArtThumb] = useState(null);
+    const [solo, setSolo] = useState(null);
     const [loadError, setLoadError] = useState(null);
     const [uploadId, setUploadId] = useState(0);
     const [isLoadingImage, setIsLoadingImage] = useState(false);
@@ -461,8 +458,6 @@ function App() {
     const previewCanvasRef = useRef(null);
     const inkRequestRef = useRef(0);
     const inkCacheRef = useRef(null);
-    const contourMaskRef = useRef(null);
-    const showContourRef = useRef(false);
     const shadingVisibleRef = useRef(false);
     const showLinesRef = useRef(false);
     const lineArtVisibleRef = useRef(true);
@@ -471,8 +466,8 @@ function App() {
     const bgVisibleRef = useRef(true);
     const colorOpacityRef = useRef([]);
     const lineArtOpacityRef = useRef(100);
-    const contourOpacityRef = useRef(100);
     const shadingOpacityRef = useRef(100);
+    const soloRef = useRef(null);
     const clustersRef = useRef([]);
     const pickedPointsRef = useRef([]);
     const pickSerialRef = useRef(0);
@@ -482,13 +477,6 @@ function App() {
     const manualCountRef = useRef(6);
     const modeRef = useRef("auto");
     const study = useColorStudy(imageRef, uploadId, mode === "study");
-    const [clickSound, setClickSound] = useState(() => {
-        try {
-            return localStorage.getItem("palette-click-sound") === "1";
-        } catch {
-            return false;
-        }
-    });
     const [replayOpen, setReplayOpen] = useState(false);
     const [replayMenu, setReplayMenu] = useState(false);
     const [svgReplay, setSvgReplay] = useState(false);
@@ -723,18 +711,17 @@ function App() {
                     imageRef.current = stored;
                     previewRef.current = stored;
                     inkCacheRef.current = null;
-                    contourMaskRef.current = null;
-                    showContourRef.current = false;
                     lineArtVisibleRef.current = true;
+                    soloRef.current = null;
                     colorVisibleRef.current = [];
                     pickedPointsRef.current = [];
                     pickSerialRef.current = 0;
                     setPickedPoints([]);
-                    setShowContourLayer(false);
                     setLineArtVisible(true);
                     setColorVisible([]);
-                    setContourThumb(null);
+                    setLineThumb(null);
                     setLineArtThumb(null);
+                    setSolo(null);
                     setCenterTab("recolor");
                     setImageData(canvas.toDataURL());
                     setUploadId((id) => id + 1);
@@ -1071,6 +1058,36 @@ function App() {
         setColorVisible(next);
     };
 
+    const colorsAllOn = clusters.length > 0 && clusters.every((_, index) => colorVisible[index] !== false);
+
+    const toggleSolo = (next) => {
+        setSolo((current) => {
+            const same = current && current.kind === next.kind && current.index === next.index;
+            const value = same ? null : next;
+            soloRef.current = value;
+            return value;
+        });
+    };
+
+    const copySoloLayer = () => {
+        if (!solo) return;
+        if (solo.kind === "color") {
+            const center = clusters[solo.index];
+            if (center?.rgb) copyToClipboard(rgb01ToHex(center.rgb));
+            return;
+        }
+        const canvas = previewCanvasRef.current;
+        if (!canvas || typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) return;
+        canvas.toBlob((blob) => {
+            if (!blob) return;
+            navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]).then(() => {
+                setCopiedHex("layer");
+                clearTimeout(copiedHexTimeoutRef.current);
+                copiedHexTimeoutRef.current = setTimeout(() => setCopiedHex(null), 1200);
+            });
+        });
+    };
+
     const copyToClipboard = (hex) => {
         navigator.clipboard.writeText(hex).then(() => {
             setCopiedHex(hex);
@@ -1079,7 +1096,6 @@ function App() {
         });
     };
 
-    showContourRef.current = showContourLayer;
     shadingVisibleRef.current = shadingVisible;
     showLinesRef.current = showLines;
     lineArtVisibleRef.current = lineArtVisible;
@@ -1090,8 +1106,8 @@ function App() {
     bgVisibleRef.current = bgVisible;
     colorOpacityRef.current = colorOpacity;
     lineArtOpacityRef.current = lineArtOpacity;
-    contourOpacityRef.current = contourOpacity;
     shadingOpacityRef.current = shadingOpacity;
+    soloRef.current = solo;
 
     const paintComposite = () => {
         const stored = imageRef.current;
@@ -1113,7 +1129,8 @@ function App() {
         const shadingOp = (shadingOpacityRef.current ?? 100) / 100;
         const isShadingOn = shadingVisibleRef.current && shadingOp > 0;
 
-        const bgActive = bgVisibleRef.current;
+        const soloNow = soloRef.current;
+        const bgActive = soloNow ? soloNow.kind === "bg" : bgVisibleRef.current;
         const bgHex = bgColorRef.current || "#ffffff";
         let bgR = 255, bgG = 255, bgB = 255;
         if (bgHex.length === 7 && bgHex.startsWith("#")) {
@@ -1138,15 +1155,21 @@ function App() {
 
             const cluster = ids[p];
             const center = centers[cluster];
-            if (center && visibleColors[cluster] !== false) {
+            const colorOn = soloNow
+                ? soloNow.kind === "color"
+                    ? soloNow.index === cluster
+                    : soloNow.kind === "shade" && visibleColors[cluster] !== false
+                : visibleColors[cluster] !== false;
+            if (center && colorOn) {
                 const layerOp = (opacities[cluster] ?? 100) / 100;
                 if (layerOp <= 0) continue;
 
-                const color = paintedChannels(stored.data, p, center, isShadingOn);
+                const shadeHere = soloNow?.kind === "color" ? false : soloNow?.kind === "shade" ? true : isShadingOn;
+                const color = paintedChannels(stored.data, p, center, shadeHere);
                 let finalR = color[0];
                 let finalG = color[1];
                 let finalB = color[2];
-                if (shadingVisibleRef.current && shadingOp < 1.0) {
+                if (shadeHere && shadingOp < 1.0) {
                     const flat = center.rgb;
                     finalR = Math.round(flat[0] * (1 - shadingOp) + color[0] * shadingOp);
                     finalG = Math.round(flat[1] * (1 - shadingOp) + color[1] * shadingOp);
@@ -1183,41 +1206,8 @@ function App() {
             }
         }
 
-        if (showContourRef.current) {
-            const contourOp = (contourOpacityRef.current ?? 100) / 100;
-            if (contourOp > 0) {
-                if (!contourMaskRef.current || contourMaskRef.current.source !== stored.data) {
-                    contourMaskRef.current = {
-                        source: stored.data,
-                        mask: dilate(contourMask(stored.data, width, height), width, height, 1),
-                    };
-                }
-                const mask = contourMaskRef.current.mask;
-                const strokeAlpha = (230 / 255) * contourOp;
-                for (let i = 0; i < mask.length; i++) {
-                    if (!mask[i]) continue;
-                    const offset = i * 4;
-                    const destR = frame.data[offset];
-                    const destG = frame.data[offset + 1];
-                    const destB = frame.data[offset + 2];
-                    const destA = frame.data[offset + 3] / 255;
-
-                    if (bgActive || destA > 0) {
-                        frame.data[offset] = Math.round(12 * strokeAlpha + destR * (1 - strokeAlpha));
-                        frame.data[offset + 1] = Math.round(12 * strokeAlpha + destG * (1 - strokeAlpha));
-                        frame.data[offset + 2] = Math.round(12 * strokeAlpha + destB * (1 - strokeAlpha));
-                        frame.data[offset + 3] = bgActive ? 255 : Math.round((strokeAlpha + destA * (1 - strokeAlpha)) * 255);
-                    } else {
-                        frame.data[offset] = 12;
-                        frame.data[offset + 1] = 12;
-                        frame.data[offset + 2] = 12;
-                        frame.data[offset + 3] = Math.round(strokeAlpha * 255);
-                    }
-                }
-            }
-        }
-
-        if (showLinesRef.current) {
+        const drawLines = soloNow ? soloNow.kind === "lines" : showLinesRef.current;
+        if (drawLines) {
             const edges = gradientEdges(stored.data, width, height);
             const edgeAlpha = 230 / 255;
             for (let i = 0; i < edges.length; i++) {
@@ -1244,7 +1234,8 @@ function App() {
         ctx.putImageData(frame, 0, 0);
 
         const art = inkCacheRef.current;
-        if (showInk && lineArtVisibleRef.current && art && art.source === stored.data) {
+        const drawInk = soloNow ? soloNow.kind === "ink" : lineArtVisibleRef.current;
+        if (drawInk && art && art.source === stored.data) {
             const inkOp = (lineArtOpacityRef.current ?? 100) / 100;
             if (inkOp > 0) {
                 ctx.globalAlpha = inkOp;
@@ -1263,12 +1254,6 @@ function App() {
     const refreshLineArt = useCallback(() => {
         const preview = previewRef.current;
         if (!preview) return;
-        if (!showInk) {
-            inkRequestRef.current += 1;
-            setInkNote("");
-            setLineArtThumb(null);
-            return;
-        }
         const cached = inkCacheRef.current;
         if (cached && cached.source === preview.data) {
             setInkNote("");
@@ -1291,7 +1276,7 @@ function App() {
                 if (request !== inkRequestRef.current) return;
                 setInkNote(`선화를 추출하지 못했습니다 (${error.message || error})`);
             });
-    }, [showInk]);
+    }, []);
 
     useEffect(() => {
         refreshLineArt();
@@ -1302,11 +1287,11 @@ function App() {
         if (!stored) return;
         try {
             const small = downscaleImage(stored.data, stored.width, stored.height, 180);
-            const mask = dilate(contourMask(small.data, small.width, small.height), small.width, small.height, 1);
-            setContourThumb(strokeThumbnail(mask, small.width, small.height));
+            const edges = gradientEdges(small.data, small.width, small.height);
+            setLineThumb(strokeThumbnail(edges, small.width, small.height));
         } catch (error) {
             console.error(error);
-            setContourThumb(null);
+            setLineThumb(null);
         }
     }, [imageData]);
 
@@ -1321,18 +1306,16 @@ function App() {
         imageData,
         clusters,
         colorVisible,
-        showContourLayer,
         shadingVisible,
         lineArtVisible,
         showLines,
-        showInk,
+        solo,
         lineArtThumb,
         isUpdating,
         bgColor,
         bgVisible,
         colorOpacity,
         lineArtOpacity,
-        contourOpacity,
         shadingOpacity,
     ]);
 
@@ -1341,21 +1324,6 @@ function App() {
             updateCanvasAndLayers(clusters);
         }
     }, [clusters, isUpdating]);
-
-    useEffect(() => {
-        setClickSoundEnabled(clickSound);
-    }, [clickSound]);
-
-    useEffect(() => {
-        const onDown = (event) => {
-            if (event.button != null && event.button !== 0) return;
-            const el = event.target instanceof Element ? event.target.closest("button") : null;
-            if (!el || el.disabled || el.dataset.soundToggle != null) return;
-            playClick();
-        };
-        document.addEventListener("pointerdown", onDown, true);
-        return () => document.removeEventListener("pointerdown", onDown, true);
-    }, []);
 
     const stageOpen = replayOpen || svgReplay;
 
@@ -1451,18 +1419,6 @@ function App() {
         setReplayMenu((open) => !open);
     };
 
-    const toggleClickSound = () => {
-        const next = !clickSound;
-        setClickSoundEnabled(next);
-        setClickSound(next);
-        try {
-            localStorage.setItem("palette-click-sound", next ? "1" : "0");
-        } catch {
-            /* ignore private browsing */
-        }
-        if (next) playClick();
-    };
-
     const renderModeTabs = (includeStudy = false) => (
         <div role="tablist" className="mode-tabs" aria-label="추출 방식">
             {[
@@ -1534,40 +1490,6 @@ function App() {
             )}
             {imageData && centerTab !== "svg" && renderViewTabs()}
             {imageData && mode === "study" && centerTab !== "svg" && <StudyTools study={study} />}
-            {imageData && mode !== "study" && centerTab !== "svg" && (
-                <>
-                    <div className="button-row" role="toolbar" aria-label="미리보기 도구">
-                        <button
-                            type="button"
-                            className="mode-tab"
-                            aria-pressed={showLines}
-                            onClick={() => setShowLines((value) => !value)}
-                        >
-                            선 필터
-                        </button>
-                        <button
-                            type="button"
-                            className="mode-tab"
-                            aria-pressed={showInk}
-                            onClick={() => setShowInk((value) => !value)}
-                        >
-                            선화 추출
-                        </button>
-                        {inkNote && <span className="header-toolbar-note">{inkNote}</span>}
-                    </div>
-                </>
-            )}
-            <div className="button-row">
-                <button
-                    type="button"
-                    className="mode-tab"
-                    aria-pressed={clickSound}
-                    data-sound-toggle=""
-                    onClick={toggleClickSound}
-                >
-                    클릭음
-                </button>
-            </div>
         </>
     );
 
@@ -1809,12 +1731,13 @@ function App() {
                                 mode={mode}
                                 image={imageRef.current}
                                 fileName={imageInfo?.name}
-                                ink={showInk ? inkCacheRef.current?.art : null}
+                                ink={inkCacheRef.current?.art ?? null}
                                 inkNote={inkNote}
-                                includeInk={showInk}
-                                onIncludeInk={setShowInk}
-                                clickSound={clickSound}
-                                onToggleClickSound={toggleClickSound}
+                                includeInk={lineArtVisible}
+                                onIncludeInk={(value) => {
+                                    lineArtVisibleRef.current = value;
+                                    setLineArtVisible(value);
+                                }}
                                 onView={openCenter}
                                 onReplayActive={setSvgReplay}
                             />
@@ -1862,33 +1785,66 @@ function App() {
                                                     색상 초기화
                                                 </button>
                                             )}
-                                        <button type="button" onClick={() => setAllColorsVisible(true)}>
-                                            전체 선택
+                                        <button
+                                            type="button"
+                                            aria-pressed={colorsAllOn}
+                                            onClick={() => setAllColorsVisible(!colorsAllOn)}
+                                        >
+                                            {colorsAllOn ? "전체 해제" : "전체 선택"}
                                         </button>
-                                        <button type="button" onClick={() => setAllColorsVisible(false)}>
-                                            전체 해제
+                                        <button type="button" onClick={copySoloLayer} disabled={!solo}>
+                                            {copiedHex ? "복사됨" : "선택 복사"}
                                         </button>
                                     </div>
                             </div>
                             )}
-                            {showInk && lineArtThumb && (
-                                <div className="layer-row-wrapper">
-                                    <label className="layer-row" data-hidden={lineArtVisible ? "false" : "true"}>
-                                        <img src={lineArtThumb} alt="" />
-                                        <span className="layer-name">
-                                            <span className="layer-name-top">선화</span>
-                                            <span className="layer-share">불투명도 {lineArtOpacity}%</span>
-                                        </span>
-                                        <input
-                                            type="checkbox"
-                                            checked={lineArtVisible}
-                                            aria-label="선화 표시"
-                                            onChange={(e) => {
-                                                lineArtVisibleRef.current = e.target.checked;
-                                                setLineArtVisible(e.target.checked);
-                                            }}
-                                        />
-                                    </label>
+                            <div className="layer-row-wrapper">
+                                <div
+                                    className="layer-row"
+                                    data-hidden={showLines ? "false" : "true"}
+                                    data-solo={solo?.kind === "lines" ? "true" : "false"}
+                                    onClick={() => toggleSolo({ kind: "lines" })}
+                                >
+                                    {lineThumb ? <img src={lineThumb} alt="" /> : <span className="layer-thumb" />}
+                                    <span className="layer-name">
+                                        <span className="layer-name-top">선 필터</span>
+                                        <span className="layer-share">밝기 경계</span>
+                                    </span>
+                                    <input
+                                        type="checkbox"
+                                        checked={showLines}
+                                        aria-label="선 필터 표시"
+                                        onClick={(event) => event.stopPropagation()}
+                                        onChange={(event) => {
+                                            showLinesRef.current = event.target.checked;
+                                            setShowLines(event.target.checked);
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                            <div className="layer-row-wrapper">
+                                <div
+                                    className="layer-row"
+                                    data-hidden={lineArtVisible ? "false" : "true"}
+                                    data-solo={solo?.kind === "ink" ? "true" : "false"}
+                                    onClick={() => toggleSolo({ kind: "ink" })}
+                                >
+                                    {lineArtThumb ? <img src={lineArtThumb} alt="" /> : <span className="layer-thumb" />}
+                                    <span className="layer-name">
+                                        <span className="layer-name-top">선화</span>
+                                        <span className="layer-share">{inkNote || `불투명도 ${lineArtOpacity}%`}</span>
+                                    </span>
+                                    <input
+                                        type="checkbox"
+                                        checked={lineArtVisible}
+                                        aria-label="선화 표시"
+                                        onClick={(event) => event.stopPropagation()}
+                                        onChange={(event) => {
+                                            lineArtVisibleRef.current = event.target.checked;
+                                            setLineArtVisible(event.target.checked);
+                                        }}
+                                    />
+                                </div>
                                     {lineArtVisible && (
                                         <div className="layer-opacity-row">
                                             <input
@@ -1906,60 +1862,30 @@ function App() {
                                             <span>{lineArtOpacity}%</span>
                                         </div>
                                     )}
-                                </div>
-                            )}
-                            <div className="layer-row-wrapper">
-                                <label className="layer-row" data-hidden={showContourLayer ? "false" : "true"}>
-                                    {contourThumb ? <img src={contourThumb} alt="" /> : <span className="layer-thumb" />}
-                                    <span className="layer-name">
-                                        <span className="layer-name-top">윤곽선</span>
-                                        <span className="layer-share">불투명도 {contourOpacity}%</span>
-                                    </span>
-                                    <input
-                                        type="checkbox"
-                                        checked={showContourLayer}
-                                        aria-label="윤곽선 표시"
-                                        onChange={(e) => {
-                                            showContourRef.current = e.target.checked;
-                                            setShowContourLayer(e.target.checked);
-                                        }}
-                                    />
-                                </label>
-                                {showContourLayer && (
-                                    <div className="layer-opacity-row">
-                                        <input
-                                            type="range"
-                                            min="0"
-                                            max="100"
-                                            value={contourOpacity}
-                                            aria-label="윤곽선 불투명도"
-                                            onChange={(e) => {
-                                                const val = Number(e.target.value);
-                                                contourOpacityRef.current = val;
-                                                setContourOpacity(val);
-                                            }}
-                                        />
-                                        <span>{contourOpacity}%</span>
-                                    </div>
-                                )}
                             </div>
                             <div className="layer-row-wrapper">
-                                <label className="layer-row" data-hidden={shadingVisible ? "false" : "true"}>
+                                <div
+                                    className="layer-row"
+                                    data-hidden={shadingVisible ? "false" : "true"}
+                                    data-solo={solo?.kind === "shade" ? "true" : "false"}
+                                    onClick={() => toggleSolo({ kind: "shade" })}
+                                >
                                     <span className="layer-thumb" />
                                     <span className="layer-name">
                                         <span className="layer-name-top">음영</span>
                                         <span className="layer-share">원본 명암 겹침 · {shadingOpacity}%</span>
                                     </span>
-                                    <input
-                                        type="checkbox"
-                                        checked={shadingVisible}
-                                        aria-label="음영 표시"
-                                        onChange={(e) => {
-                                            shadingVisibleRef.current = e.target.checked;
-                                            setShadingVisible(e.target.checked);
-                                        }}
-                                    />
-                                </label>
+                                        <input
+                                            type="checkbox"
+                                            checked={shadingVisible}
+                                            aria-label="음영 표시"
+                                            onClick={(event) => event.stopPropagation()}
+                                            onChange={(e) => {
+                                                shadingVisibleRef.current = e.target.checked;
+                                                setShadingVisible(e.target.checked);
+                                            }}
+                                        />
+                                    </div>
                                 {shadingVisible && (
                                     <div className="layer-opacity-row">
                                         <input
@@ -1987,30 +1913,29 @@ function App() {
                                     const shown = colorVisible[i] !== false;
                                     const opacity = colorOpacity[i] ?? 100;
                                     const isModified = swatchEdited(c, i);
+                                    const colorSolo = solo?.kind === "color" && solo.index === i;
                                     return (
                                         <div key={`${mode}-layer-${i}`} className="layer-row-wrapper">
-                                            <label className="layer-row" data-hidden={shown ? "false" : "true"}>
+                                            <div
+                                                className="layer-row"
+                                                data-hidden={shown ? "false" : "true"}
+                                                data-solo={colorSolo ? "true" : "false"}
+                                                onClick={() => toggleSolo({ kind: "color", index: i })}
+                                            >
                                                 <span className="layer-num-badge">{orderIndex + 1}</span>
                                                 {layerImages[i] ? <img src={layerImages[i]} alt="" /> : <span className="layer-thumb" />}
                                                 <span className="layer-name">
                                                     <span className="layer-name-top">
                                                         <input
-                                                            className="palette-swatch layer-dot"
+                                                            className="palette-swatch layer-dot layer-color"
                                                             type="color"
                                                             value={hex}
-                                                            aria-label={`${hex} 색상 수정`}
+                                                            title="색 변경"
+                                                            aria-label={`${hex} 색 변경`}
+                                                            onClick={(event) => event.stopPropagation()}
                                                             onChange={(e) => handleColorChange(i, e)}
                                                         />
-                                                        <button
-                                                            type="button"
-                                                            className="layer-hex"
-                                                            onClick={(e) => {
-                                                                e.preventDefault();
-                                                                copyToClipboard(hex);
-                                                            }}
-                                                        >
-                                                            {copiedHex === hex ? "복사됨" : hex}
-                                                        </button>
+                                                        <span className="layer-hex">{hex}</span>
                                                         {isModified && (
                                                             <button
                                                                 type="button"
@@ -2018,6 +1943,7 @@ function App() {
                                                                 title="원래 색상으로 초기화"
                                                                 onClick={(e) => {
                                                                     e.preventDefault();
+                                                                    e.stopPropagation();
                                                                     resetSingleColor(i);
                                                                 }}
                                                             >
@@ -2031,6 +1957,7 @@ function App() {
                                                     type="checkbox"
                                                     checked={shown}
                                                     aria-label={`${hex} 표시`}
+                                                    onClick={(event) => event.stopPropagation()}
                                                     onChange={(e) => {
                                                         const checked = e.target.checked;
                                                         setColorVisible((prev) => {
@@ -2041,7 +1968,7 @@ function App() {
                                                         });
                                                     }}
                                                 />
-                                            </label>
+                                            </div>
                                             {shown && (
                                                 <div className="layer-opacity-row">
                                                     <input
@@ -2067,12 +1994,19 @@ function App() {
                                     );
                                 })}
                             <div className="layer-row-wrapper layer-row-bg-wrapper">
-                                <label className="layer-row layer-row-bg" data-hidden={bgVisible ? "false" : "true"}>
+                                <div
+                                    className="layer-row layer-row-bg"
+                                    data-hidden={bgVisible ? "false" : "true"}
+                                    data-solo={solo?.kind === "bg" ? "true" : "false"}
+                                    onClick={() => toggleSolo({ kind: "bg" })}
+                                >
                                     <input
-                                        className="palette-swatch layer-dot"
+                                        className="palette-swatch layer-dot layer-color"
                                         type="color"
                                         value={bgColor}
-                                        aria-label="배경 색상 변경"
+                                        title="배경 색 변경"
+                                        aria-label="배경 색 변경"
+                                        onClick={(event) => event.stopPropagation()}
                                         onChange={(e) => {
                                             bgColorRef.current = e.target.value;
                                             setBgColor(e.target.value);
@@ -2086,12 +2020,13 @@ function App() {
                                         type="checkbox"
                                         checked={bgVisible}
                                         aria-label="배경 색상 표시"
+                                        onClick={(event) => event.stopPropagation()}
                                         onChange={(e) => {
                                             bgVisibleRef.current = e.target.checked;
                                             setBgVisible(e.target.checked);
                                         }}
                                     />
-                                </label>
+                                </div>
                             </div>
                                 </>
                             )}

@@ -1104,6 +1104,15 @@ input[type="checkbox"] {
     text-align: center;
 }
 
+.layer-row[data-solo="true"] {
+    outline: 2px solid var(--ink);
+    outline-offset: -2px;
+}
+
+.layer-color {
+    box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--ink);
+}
+
 .layer-row[data-hidden="true"] {
     opacity: 0.45;
 }
