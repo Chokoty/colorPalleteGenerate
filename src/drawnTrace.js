@@ -1,4 +1,3 @@
-import { srgbToOklab } from "./colorStudy.js";
 import { lineToPath, polylineLength, resizeMask, simplifyOpen, skeletonPolylines } from "./svgTrace.js";
 
 // Ten drawing stages, in paint order. The shape is the domain:
@@ -16,8 +15,6 @@ export const BATCH_PLAN = [
     { id: "batch-10", index: 9, title: "4-3. 마무리 점", role: "residual", share: 0.05, minArea: 1, diff: 6.5 },
 ];
 
-const REFERENCE_PIXELS = 1122 * 1402;
-
 export const TRACE_MAX_SIDE = 1000;
 
 export function elementCap(detail) {
@@ -34,6 +31,21 @@ export function traceTuning(detail) {
     };
 }
 
+// colorPrecision is the wasm clustering shift. 0 keeps the photo's colors.
+// A larger shift merges them. layerDifference is how far apart a new layer must be.
+export function fidelityTuning(detail, colorCount) {
+    const t = clampUnit((Number(detail) || 0) / 100);
+    const colors = Math.max(3, Math.min(8, Math.round(Number(colorCount) || 8)));
+    const span = (colors - 3) / 5;
+    return {
+        filterSpeckle: Math.max(2, Math.round(10 - t * 9)),
+        cornerDeg: 60,
+        pathPrecision: 3,
+        colorPrecision: span >= 0.8 ? 0 : span >= 0.4 ? 1 : 2,
+        layerDifference: Math.round(64 - span * 48),
+    };
+}
+
 // visioncortex compares the corner angle in radians. The published config
 // names are degrees, matching the vtracer demo.
 export function vtracerConfig({ filterSpeckle, cornerDeg, pathPrecision, binary, layerDifference, colorPrecision }) {
@@ -47,8 +59,8 @@ export function vtracerConfig({ filterSpeckle, cornerDeg, pathPrecision, binary,
         maxIterations: 8,
         spliceThreshold: rad(45),
         filterSpeckle,
-        // visioncortex asserts this bit shift is below 8.
-        colorPrecision: Math.max(1, Math.min(7, colorPrecision)),
+        // visioncortex asserts this right shift is below 8. 0 is the finest step.
+        colorPrecision: Math.max(0, Math.min(7, Math.round(Number(colorPrecision) || 0))),
         layerDifference,
         pathPrecision,
     };
@@ -135,33 +147,6 @@ export function smoothEdges(rgba, width, height, radius = 2, sigmaColor = 28) {
     return out;
 }
 
-function imageLab(rgba, width, height) {
-    const lab = new Float32Array(width * height * 3);
-    for (let i = 0; i < width * height; i++) {
-        const o = i * 4;
-        if (rgba[o + 3] < 128) {
-            lab[i * 3] = -1;
-            continue;
-        }
-        const [l, a, b] = srgbToOklab(rgba[o] / 255, rgba[o + 1] / 255, rgba[o + 2] / 255);
-        lab[i * 3] = l;
-        lab[i * 3 + 1] = a;
-        lab[i * 3 + 2] = b;
-    }
-    return lab;
-}
-
-export function segmentCount(base, width, height) {
-    const pixels = width * height;
-    const scaled = Math.round(base * (pixels / REFERENCE_PIXELS));
-    const cap = Math.max(2, Math.floor(pixels / 12));
-    return Math.max(2, Math.min(cap, Math.max(scaled, Math.min(base, cap))));
-}
-
-function areaFloor(base, width, height) {
-    const factor = Math.sqrt((width * height) / REFERENCE_PIXELS);
-    return Math.max(1, Math.round(base * Math.max(factor, 0.05)));
-}
 
 export function slicLabels(lab, width, height, count, compactness = 6) {
     const pixels = width * height;
@@ -330,247 +315,6 @@ export function mergeSmallRegions(labels, ref, width, height, minArea) {
     return current;
 }
 
-function quantizeLabels(labels, ref, colorCount) {
-    const means = regionMeans(ref, labels);
-    const rows = [...means.entries()].map(([id, mean]) => ({ id, ...mean }));
-    if (rows.length <= colorCount) return labels;
-    rows.sort((a, b) => b.n - a.n);
-    const seeds = [rows[0]];
-    while (seeds.length < colorCount) {
-        let best = null;
-        let bestDist = -1;
-        for (const row of rows) {
-            if (seeds.some((seed) => seed.id === row.id)) continue;
-            let nearest = Infinity;
-            for (const seed of seeds) {
-                nearest = Math.min(nearest, (row.r - seed.r) ** 2 + (row.g - seed.g) ** 2 + (row.b - seed.b) ** 2);
-            }
-            if (nearest > bestDist) {
-                bestDist = nearest;
-                best = row;
-            }
-        }
-        if (!best) break;
-        seeds.push(best);
-    }
-    const assign = new Map();
-    for (let iter = 0; iter < 6; iter++) {
-        const buckets = seeds.map(() => ({ r: 0, g: 0, b: 0, n: 0 }));
-        for (const row of rows) {
-            let best = 0;
-            let bestDist = Infinity;
-            for (let s = 0; s < seeds.length; s++) {
-                const dist = (row.r - seeds[s].r) ** 2 + (row.g - seeds[s].g) ** 2 + (row.b - seeds[s].b) ** 2;
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    best = s;
-                }
-            }
-            assign.set(row.id, best);
-            const bucket = buckets[best];
-            bucket.r += row.r * row.n;
-            bucket.g += row.g * row.n;
-            bucket.b += row.b * row.n;
-            bucket.n += row.n;
-        }
-        for (let s = 0; s < seeds.length; s++) {
-            if (!buckets[s].n) continue;
-            seeds[s] = {
-                ...seeds[s],
-                r: buckets[s].r / buckets[s].n,
-                g: buckets[s].g / buckets[s].n,
-                b: buckets[s].b / buckets[s].n,
-            };
-        }
-    }
-    const out = new Int32Array(labels.length);
-    for (let i = 0; i < labels.length; i++) {
-        const id = labels[i];
-        if (!id) continue;
-        out[i] = assign.get(id) + 1;
-    }
-    return out;
-}
-
-function weightMap(width, height) {
-    const weights = new Float32Array(width * height);
-    const cx = width * 0.5;
-    const cy = height * 0.34;
-    const rx = width * 0.28;
-    const ry = height * 0.22;
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            const nx = (x - cx) / rx;
-            const ny = (y - cy) / ry;
-            weights[y * width + x] = nx * nx + ny * ny <= 1 ? 1.6 : 1;
-        }
-    }
-    return weights;
-}
-
-function blankCanvas(ref) {
-    const out = new Uint8ClampedArray(ref.length);
-    const r = ref[0];
-    const g = ref[1];
-    const b = ref[2];
-    for (let i = 0; i < ref.length; i += 4) {
-        out[i] = r;
-        out[i + 1] = g;
-        out[i + 2] = b;
-        out[i + 3] = 255;
-    }
-    return out;
-}
-
-function selectRegions(ref, current, labels, width, weights, minGain, limit, minArea) {
-    const means = regionMeans(ref, labels);
-    const stats = new Map();
-    for (const [id, mean] of means) {
-        stats.set(id, { id, ...mean, old: 0, next: 0, weight: 0, sy: 0 });
-    }
-    for (let i = 0; i < labels.length; i++) {
-        const id = labels[i];
-        if (!id) continue;
-        const row = stats.get(id);
-        const o = i * 4;
-        const dr = ref[o] - current[o];
-        const dg = ref[o + 1] - current[o + 1];
-        const db = ref[o + 2] - current[o + 2];
-        row.old += Math.hypot(dr, dg, db);
-        row.next += Math.hypot(ref[o] - row.r, ref[o + 1] - row.g, ref[o + 2] - row.b);
-        row.weight += weights[i];
-        row.sy += (i / width) | 0;
-    }
-    const ranked = [];
-    for (const row of stats.values()) {
-        if (row.n < minArea) continue;
-        const improvement = (row.old - row.next) / row.n;
-        if (improvement < minGain) continue;
-        const gain = ((row.old - row.next) * (row.weight / row.n)) / row.n ** 0.3;
-        ranked.push({ id: row.id, gain, area: row.n, cy: row.sy / row.n });
-    }
-    ranked.sort((a, b) => b.gain - a.gain || b.area - a.area || a.cy - b.cy);
-    return ranked.slice(0, limit);
-}
-
-function largestRegions(labels, width, limit, minArea) {
-    const counts = new Map();
-    const sy = new Map();
-    for (let i = 0; i < labels.length; i++) {
-        const id = labels[i];
-        if (!id) continue;
-        counts.set(id, (counts.get(id) || 0) + 1);
-        sy.set(id, (sy.get(id) || 0) + ((i / width) | 0));
-    }
-    const ranked = [];
-    for (const [id, area] of counts) {
-        if (area < minArea) continue;
-        ranked.push({ id, area, cy: sy.get(id) / area, gain: area });
-    }
-    ranked.sort((a, b) => b.area - a.area || a.cy - b.cy);
-    return ranked.slice(0, limit);
-}
-
-function residualLabels(ref, current, width, height, diffThresh, minArea, maxArea) {
-    const mask = new Uint8Array(width * height);
-    for (let i = 0; i < mask.length; i++) {
-        const o = i * 4;
-        if (ref[o + 3] < 128) continue;
-        const delta = Math.hypot(ref[o] - current[o], ref[o + 1] - current[o + 1], ref[o + 2] - current[o + 2]);
-        if (delta > diffThresh) mask[i] = 1;
-    }
-    const labels = new Int32Array(mask.length);
-    let nextId = 1;
-    const stack = [];
-    for (let start = 0; start < mask.length; start++) {
-        if (!mask[start] || labels[start]) continue;
-        const id = nextId;
-        nextId += 1;
-        stack.push(start);
-        labels[start] = id;
-        let count = 0;
-        let minX = width;
-        let minY = height;
-        let maxX = 0;
-        let maxY = 0;
-        while (stack.length) {
-            const i = stack.pop();
-            count += 1;
-            const x = i % width;
-            const y = (i / width) | 0;
-            if (x < minX) minX = x;
-            if (y < minY) minY = y;
-            if (x > maxX) maxX = x;
-            if (y > maxY) maxY = y;
-            if (x > 0 && mask[i - 1] && !labels[i - 1]) {
-                labels[i - 1] = id;
-                stack.push(i - 1);
-            }
-            if (x + 1 < width && mask[i + 1] && !labels[i + 1]) {
-                labels[i + 1] = id;
-                stack.push(i + 1);
-            }
-            if (y > 0 && mask[i - width] && !labels[i - width]) {
-                labels[i - width] = id;
-                stack.push(i - width);
-            }
-            if (y + 1 < height && mask[i + width] && !labels[i + width]) {
-                labels[i + width] = id;
-                stack.push(i + width);
-            }
-        }
-        if (count < minArea) {
-            for (let i = 0; i < labels.length; i++) if (labels[i] === id) labels[i] = 0;
-            continue;
-        }
-        if (count <= maxArea) continue;
-        const cols = Math.max(2, Math.ceil((maxX - minX + 1) / 8));
-        const rows = Math.max(2, Math.ceil((maxY - minY + 1) / 8));
-        const cellW = (maxX - minX + 1) / cols;
-        const cellH = (maxY - minY + 1) / rows;
-        const cellIds = new Map();
-        for (let y = minY; y <= maxY; y++) {
-            for (let x = minX; x <= maxX; x++) {
-                const i = y * width + x;
-                if (labels[i] !== id) continue;
-                const cx = Math.min(cols - 1, Math.floor((x - minX) / cellW));
-                const cy = Math.min(rows - 1, Math.floor((y - minY) / cellH));
-                const key = cy * cols + cx;
-                let cell = cellIds.get(key);
-                if (!cell) {
-                    cell = nextId;
-                    nextId += 1;
-                    cellIds.set(key, cell);
-                }
-                labels[i] = cell;
-            }
-        }
-    }
-    return labels;
-}
-
-function paintRegions(target, ref, labels, ids) {
-    const allowed = ids instanceof Set ? ids : new Set(ids);
-    const means = regionMeans(ref, labels);
-    for (let i = 0; i < labels.length; i++) {
-        const id = labels[i];
-        if (!allowed.has(id)) continue;
-        const mean = means.get(id);
-        if (!mean) continue;
-        const o = i * 4;
-        target[o] = mean.r;
-        target[o + 1] = mean.g;
-        target[o + 2] = mean.b;
-        target[o + 3] = 255;
-    }
-}
-
-function paintedRgba(ref, labels, ids, width, height) {
-    const out = new Uint8ClampedArray(width * height * 4);
-    paintRegions(out, ref, labels, ids);
-    return out;
-}
-
 function formatCoord(value) {
     const rounded = Math.round(value * 1000) / 1000;
     return Object.is(rounded, -0) ? "0" : String(rounded);
@@ -712,6 +456,37 @@ function orderPaths(paths, limit) {
     return ordered.slice(0, limit).map(({ d, fill, opacity }) => ({ d, fill, opacity }));
 }
 
+// Large shapes stay in the first color batch. Smaller ones follow, back to front.
+export function assignColorPaths(paths, plans) {
+    const ordered = paths
+        .map((path) => ({ ...path, ...pathBounds(path.d) }))
+        .sort((a, b) => b.area - a.area || a.cy - b.cy);
+    const buckets = plans.map(() => []);
+    if (!ordered.length || !plans.length) return buckets;
+    const largest = ordered[0].area || 1;
+    const flat = [];
+    const rest = [];
+    for (const path of ordered) {
+        const shape = { d: path.d, fill: path.fill, opacity: path.opacity ?? 1 };
+        if (path.area >= largest * 0.25) flat.push(shape);
+        else rest.push(shape);
+    }
+    buckets[0] = flat;
+    const detailPlans = plans.slice(1);
+    if (!rest.length || !detailPlans.length) return buckets;
+    let cursor = 0;
+    for (let index = 0; index < detailPlans.length; index++) {
+        const remainingShare = detailPlans.slice(index).reduce((sum, plan) => sum + plan.share, 0);
+        const count =
+            index === detailPlans.length - 1
+                ? rest.length - cursor
+                : Math.max(0, Math.round(((rest.length - cursor) * detailPlans[index].share) / remainingShare));
+        buckets[index + 1] = rest.slice(cursor, cursor + count);
+        cursor += count;
+    }
+    return buckets;
+}
+
 export function edgeImage(rgba, width, height) {
     const out = new Uint8ClampedArray(width * height * 4);
     out.fill(255);
@@ -743,6 +518,20 @@ export function edgeImage(rgba, width, height) {
             out[o + 1] = 0;
             out[o + 2] = 0;
         }
+    }
+    return out;
+}
+
+function blankCanvas(ref) {
+    const out = new Uint8ClampedArray(ref.length);
+    const r = ref[0];
+    const g = ref[1];
+    const b = ref[2];
+    for (let i = 0; i < ref.length; i += 4) {
+        out[i] = r;
+        out[i + 1] = g;
+        out[i + 2] = b;
+        out[i + 3] = 255;
     }
     return out;
 }
@@ -810,13 +599,6 @@ function lineArtLayer(ink, width, height) {
     };
 }
 
-async function traceRegions(ref, labels, regions, width, height, traceSvg, config) {
-    const ids = regions.map((region) => region.id);
-    if (!ids.length) return [];
-    const rgba = paintedRgba(ref, labels, ids, width, height);
-    const svg = await traceSvg(rgba, width, height, config);
-    return orderPaths(parseSvgPaths(svg), ids.length);
-}
 
 export async function buildDrawnTrace({
     data,
@@ -830,13 +612,10 @@ export async function buildDrawnTrace({
 }) {
     if (typeof traceSvg !== "function") throw new Error("traceSvg required");
     const tuning = traceTuning(detail);
+    const fidelity = fidelityTuning(detail, colorCount);
     const cap = elementCap(detail);
-    const palette = Math.max(3, Math.min(8, Math.round(Number(colorCount) || 8)));
-    const smooth = smoothEdges(data, width, height);
-    const lab = imageLab(smooth, width, height);
-    const weights = weightMap(width, height);
     const current = blankCanvas(data);
-    const edges = edgeImage(smooth, width, height);
+    const edges = edgeImage(data, width, height);
     const batches = [];
 
     const report = (plan) => {
@@ -872,57 +651,26 @@ export async function buildDrawnTrace({
         batches.push({ ...plan, paths, ...error });
     }
 
-    for (const plan of BATCH_PLAN.slice(2)) {
-        report(plan);
-        const limit = Math.max(1, Math.round(cap * plan.share));
-        let labels;
-        let chosen;
-        if (plan.role === "residual") {
-            labels = residualLabels(data, current, width, height, plan.diff, areaFloor(plan.minArea, width, height), Math.max(8, limit * 4));
-            chosen = selectRegions(data, current, labels, width, weights, 2.2, limit, areaFloor(plan.minArea, width, height));
-        } else {
-            labels = mergeSmallRegions(
-                slicLabels(lab, width, height, segmentCount(plan.segments, width, height), plan.compactness),
-                smooth,
-                width,
-                height,
-                areaFloor(plan.minArea, width, height)
-            );
-            if (plan.role === "flat") labels = quantizeLabels(labels, data, palette);
-            const localWeights = plan.weight ? weights.map((value) => value * plan.weight) : weights;
-            chosen =
-                plan.role === "flat"
-                    ? largestRegions(labels, width, limit, areaFloor(plan.minArea, width, height))
-                    : selectRegions(
-                          data,
-                          current,
-                          labels,
-                          width,
-                          localWeights,
-                          plan.minGain,
-                          limit,
-                          areaFloor(plan.minArea, width, height)
-                      );
-        }
-        if (chosen.length) paintRegions(current, data, labels, chosen.map((region) => region.id));
-        const paths = await traceRegions(
-            data,
-            labels,
-            chosen,
-            width,
-            height,
-            traceSvg,
-            vtracerConfig({
-                ...tuning,
-                binary: false,
-                colorPrecision: plan.role === "flat" ? 5 : 6,
-                layerDifference: plan.role === "flat" ? 12 : 2,
-                filterSpeckle: Math.max(tuning.filterSpeckle, areaFloor(plan.minArea || 2, width, height)),
-            })
-        );
-        const error = measureError(data, current);
-        batches.push({ ...plan, paths, ...error });
-    }
+    report(BATCH_PLAN[2]);
+    const colorSvg = await traceSvg(
+        data,
+        width,
+        height,
+        vtracerConfig({
+            filterSpeckle: fidelity.filterSpeckle,
+            cornerDeg: fidelity.cornerDeg,
+            pathPrecision: fidelity.pathPrecision,
+            binary: false,
+            colorPrecision: fidelity.colorPrecision,
+            layerDifference: fidelity.layerDifference,
+        })
+    );
+    const colorPlans = BATCH_PLAN.slice(2);
+    const buckets = assignColorPaths(parseSvgPaths(colorSvg), colorPlans);
+    colorPlans.forEach((plan, index) => {
+        if (index > 0) report(plan);
+        batches.push({ ...plan, paths: buckets[index] });
+    });
 
     const layers = batches.map(batchLayer);
     const line = lineArtLayer(ink, width, height);

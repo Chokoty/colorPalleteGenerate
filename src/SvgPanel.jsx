@@ -392,8 +392,7 @@ export default function SvgPanel({
                 </button>
             </div>
             <p className="svg-note">
-                원본을 매끈하게 정리한 뒤 구도, 큰 색면, 오차를 줄이는 조각, 남은 점 순으로 쌓습니다. 앞의 두 선은 마지막에
-                사라집니다.
+                원본 픽셀을 곡선으로 따서 큰 면부터 작은 면 순으로 쌓습니다. 앞의 두 선은 마지막에 사라집니다.
                 {inkNote ? ` ${inkNote}` : ""}
             </p>
             <div className="svg-transport">
