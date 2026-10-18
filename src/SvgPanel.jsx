@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { constructionOpacity, drawnToSvg, measureError, TRACE_MAX_SIDE } from "./drawnTrace.js";
-import { inkMaskFromRgba } from "./svgTrace.js";
 import { downscaleRgba } from "./useColorStudy";
 import { ReplayChrome } from "./ui/ReplayChrome";
 import { strokeReplayStyle } from "./ui/strokeReplay";
@@ -53,13 +52,9 @@ function traceWithWorker(job, onProgress) {
             height: job.height,
             detail: job.detail,
             colorCount: job.colorCount,
-            ink: job.ink
-                ? { mask: new Uint8Array(job.ink.mask), width: job.ink.width, height: job.ink.height }
-                : null,
+            ink: null,
         };
-        const transfers = [copy.data.buffer];
-        if (copy.ink?.mask) transfers.push(copy.ink.mask.buffer);
-        worker.postMessage(copy, transfers);
+        worker.postMessage(copy, [copy.data.buffer]);
     });
     return {
         promise,
@@ -76,10 +71,6 @@ export default function SvgPanel({
     mode,
     image,
     fileName,
-    ink,
-    inkNote,
-    includeInk,
-    onIncludeInk,
     onView,
     onReplayActive,
 }) {
@@ -152,7 +143,6 @@ export default function SvgPanel({
         let cancelled = false;
         let run;
         const timer = setTimeout(() => {
-            const inkMask = includeInk && ink ? inkMaskFromRgba(ink.rgba, ink.width, ink.height) : null;
             const fitted = downscaleRgba(image.data, image.width, image.height, TRACE_MAX_SIDE);
             const id = ++runId.current;
             setStatus("tracing");
@@ -165,7 +155,6 @@ export default function SvgPanel({
                     height: fitted.height,
                     colorCount,
                     detail,
-                    ink: inkMask,
                 },
                 (progress) => {
                     if (!cancelled && id === runId.current) setProgressTitle(progress.title || "");
@@ -195,7 +184,7 @@ export default function SvgPanel({
             clearTimeout(timer);
             run?.stop();
         };
-    }, [active, image, uploadId, detail, colorCount, ink, includeInk]);
+    }, [active, image, uploadId, detail, colorCount]);
 
     useEffect(() => {
         if (!picture || !image?.data || shown < picture.layers.length) return undefined;
@@ -382,18 +371,9 @@ export default function SvgPanel({
                         onChange={(event) => setColorCount(Number(event.target.value))}
                     />
                 </label>
-                <button
-                    type="button"
-                    className="mode-tab"
-                    aria-pressed={includeInk}
-                    onClick={() => onIncludeInk(!includeInk)}
-                >
-                    선화
-                </button>
             </div>
             <p className="svg-note">
-                원본 픽셀을 곡선으로 따서 큰 면부터 작은 면 순으로 쌓습니다. 앞의 두 선은 마지막에 사라집니다.
-                {inkNote ? ` ${inkNote}` : ""}
+                원본 픽셀만 곡선으로 따서 큰 면부터 작은 면 순으로 쌓습니다. 앞의 두 선은 마지막에 사라집니다.
             </p>
             <div className="svg-transport">
                 <button type="button" className="mode-tab" onClick={togglePlay} disabled={!layerCount} aria-pressed={playing}>

@@ -1731,13 +1731,6 @@ function App() {
                                 mode={mode}
                                 image={imageRef.current}
                                 fileName={imageInfo?.name}
-                                ink={inkCacheRef.current?.art ?? null}
-                                inkNote={inkNote}
-                                includeInk={lineArtVisible}
-                                onIncludeInk={(value) => {
-                                    lineArtVisibleRef.current = value;
-                                    setLineArtVisible(value);
-                                }}
                                 onView={openCenter}
                                 onReplayActive={setSvgReplay}
                             />
