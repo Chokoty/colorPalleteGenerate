@@ -429,6 +429,7 @@ function App() {
     const [dragActive, setDragActive] = useState(false);
     const [shadingVisible, setShadingVisible] = useState(false);
     const [lineArtVisible, setLineArtVisible] = useState(true);
+    const [svgInk, setSvgInk] = useState(false);
     const [colorVisible, setColorVisible] = useState([]);
     const [originalClusters, setOriginalClusters] = useState([]);
     const [bgColor, setBgColor] = useState("#ffffff");
@@ -718,6 +719,7 @@ function App() {
                     pickSerialRef.current = 0;
                     setPickedPoints([]);
                     setLineArtVisible(true);
+                    setSvgInk(false);
                     setColorVisible([]);
                     setLineThumb(null);
                     setLineArtThumb(null);
@@ -1733,11 +1735,8 @@ function App() {
                                 fileName={imageInfo?.name}
                                 ink={inkCacheRef.current?.art ?? null}
                                 inkNote={inkNote}
-                                includeInk={lineArtVisible}
-                                onIncludeInk={(value) => {
-                                    lineArtVisibleRef.current = value;
-                                    setLineArtVisible(value);
-                                }}
+                                includeInk={svgInk}
+                                onIncludeInk={setSvgInk}
                                 onView={openCenter}
                                 onReplayActive={setSvgReplay}
                             />

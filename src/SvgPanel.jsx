@@ -392,7 +392,8 @@ export default function SvgPanel({
                 </button>
             </div>
             <p className="svg-note">
-                원본 픽셀을 곡선으로 따서 큰 면부터 작은 면 순으로 쌓습니다. 앞의 두 선은 마지막에 사라집니다.
+                원본 픽셀을 곡선으로 따서 큰 면부터 작은 면 순으로 쌓습니다. 앞의 두 선은 마지막에 사라집니다. 선화는
+                스케치라서, 버튼을 켜야 색 위에 올라갑니다.
                 {inkNote ? ` ${inkNote}` : ""}
             </p>
             <div className="svg-transport">
