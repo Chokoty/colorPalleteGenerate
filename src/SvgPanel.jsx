@@ -80,8 +80,6 @@ export default function SvgPanel({
     inkNote,
     includeInk,
     onIncludeInk,
-    clickSound = false,
-    onToggleClickSound,
     onView,
     onReplayActive,
 }) {
@@ -453,19 +451,6 @@ export default function SvgPanel({
                     </li>
                 ))}
             </ol>
-            {onToggleClickSound && (
-                <div className="button-row">
-                    <button
-                        type="button"
-                        className="mode-tab"
-                        aria-pressed={clickSound}
-                        data-sound-toggle=""
-                        onClick={onToggleClickSound}
-                    >
-                        클릭음
-                    </button>
-                </div>
-            )}
         </>
     );
 
