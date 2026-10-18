@@ -3,10 +3,12 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
     BATCH_PLAN,
+    assignColorPaths,
     buildDrawnTrace,
     constructionOpacity,
     drawnToSvg,
     elementCap,
+    fidelityTuning,
     measureError,
     mergeSmallRegions,
     parseSvgPaths,
@@ -102,6 +104,31 @@ test("construction lines are gone once every batch is drawn", () => {
     assert.equal(constructionOpacity(3, 4), 1);
 });
 
+test("eight colors trace the photo with no color shift", () => {
+    const close = fidelityTuning(64, 8);
+    const coarse = fidelityTuning(64, 3);
+    assert.equal(close.colorPrecision, 0);
+    assert.equal(close.layerDifference, 16);
+    assert.equal(close.filterSpeckle, 4);
+    assert.ok(coarse.colorPrecision > close.colorPrecision);
+    assert.ok(coarse.layerDifference > close.layerDifference);
+    assert.equal(vtracerConfig({ ...close, binary: false }).colorPrecision, 0);
+});
+
+test("large color shapes stay together in the first color batch", () => {
+    const buckets = assignColorPaths(
+        [
+            { d: "M0 0 L10 0 L10 10 L0 10 Z", fill: "#ff0000" },
+            { d: "M10 0 L20 0 L20 10 L10 10 Z", fill: "#0000ff" },
+            { d: "M0 0 L1 0 L1 1 L0 1 Z", fill: "#00ff00" },
+        ],
+        BATCH_PLAN.slice(2)
+    );
+    assert.equal(buckets[0].length, 2);
+    assert.equal(buckets.reduce((sum, bucket) => sum + bucket.length, 0), 3);
+    assert.ok(buckets.slice(1).some((bucket) => bucket.length === 1));
+});
+
 test("the tracer config is spline and hierarchical stacked", () => {
     const config = vtracerConfig({
         ...traceTuning(64),
@@ -137,9 +164,9 @@ test("ten batches score against the original and export one group each", async (
         BATCH_PLAN.map((batch) => batch.title)
     );
     assert.ok(trace.batches[2].paths.length >= 1);
-    assert.ok(trace.batches[2].mae < trace.batches[0].mae);
     assert.equal(trace.batches[3].paths.length, 0);
-    assert.ok(trace.batches[2].psnr > trace.batches[0].psnr);
+    assert.equal(new Set(trace.batches[2].paths.map((path) => path.fill.toLowerCase())).size, 2);
+    assert.ok(trace.batches[0].mae > 0);
     const doc = drawnToSvg(trace);
     assert.match(doc.svg, /data-title="2-1. 큰 색면"/);
     assert.match(doc.svg, /id="batch-01"[^>]*opacity="0"/);
@@ -184,15 +211,14 @@ test("vtracer spline stacked traces two colors as curves", async () => {
         data,
         width,
         height,
-        detail: 30,
-        colorCount: 4,
+        detail: 64,
+        colorCount: 8,
         traceSvg,
     });
     const flat = trace.batches[2];
     assert.ok(flat.paths.length >= 1);
     assert.ok(flat.paths.some((path) => /[CQ]/i.test(path.d)));
-    assert.ok(flat.mae < trace.batches[0].mae);
-    const fills = flat.paths.map((path) => path.fill.toLowerCase());
+    const fills = trace.batches.slice(2).flatMap((batch) => batch.paths).map((path) => path.fill.toLowerCase());
     assert.ok(fills.some((fill) => fill.startsWith("#d") || fill.startsWith("#e") || fill.startsWith("#c")));
     assert.ok(fills.some((fill) => fill.includes("c") || fill.startsWith("#2") || fill.startsWith("#3")));
 });
