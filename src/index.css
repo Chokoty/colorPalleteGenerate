@@ -282,6 +282,7 @@ b {
 .layer-dock-actions button:active,
 .mode-tab.mode-tab-active,
 .mode-tab[aria-pressed="true"],
+.mode-tab[aria-selected="true"],
 .ink-btn[aria-pressed="true"] {
     background: var(--ink);
     color: var(--paper);
@@ -981,8 +982,63 @@ input[type="checkbox"] {
     text-transform: uppercase;
 }
 
-.scene-block > div {
+.scene-tabs,
+.scene-shape-toggle {
+    display: flex;
+    gap: 6px;
+    padding-bottom: var(--press);
+}
+
+.scene-tabs .mode-tab,
+.scene-shape-toggle .mode-tab {
+    flex: 1 1 0;
+    padding: 7px 4px;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-align: center;
+}
+
+.scene-view {
     border: 1px solid var(--ink);
+    background: #808080;
+    min-height: 180px;
+}
+
+.scene-pending {
+    margin: 0;
+}
+
+.color-wheel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+    background: #808080;
+}
+
+.color-wheel canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: #808080;
+}
+
+.color-wheel-value {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: #f4f4f4;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.color-wheel-note {
+    margin: 0;
+    color: #f4f4f4;
+    font-size: 11px;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 .scene-hull-toggle {

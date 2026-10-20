@@ -1,413 +1,396 @@
-import { useEffect, useState, useRef } from "react";
-import { Canvas, useThree, useFrame, extend } from "@react-three/fiber";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry.js";
 import Stats from "stats.js";
+import {
+    HSV_CENTER,
+    HSV_HEIGHT,
+    HSV_RADIUS,
+    hsvToPosition,
+    hsvToRgb,
+    markerRadius,
+    rgbToHsv,
+    srgbToLinear,
+} from "./hsv.js";
 
-// ConvexGeometry를 React Three Fiber에 등록
-extend({ ConvexGeometry });
+const RGB_SPHERE_RADIUS = 3.825;
+const HSV_SPHERE_MIN = 5.5;
+const HSV_SPHERE_MAX = 20;
+const HULL_POINT_CAP = 1000;
 
-function SceneContent({ points, clusters, enableDamping, showConvexHull }) {
-    const { scene, gl, camera } = useThree();
-    const controlsRef = useRef();
-    const edgesRef = useRef(); // edges를 저장하기 위한 ref
-    const statsRef = useRef(new Stats());
-    const canvasContainerRef = useRef(null);
-    const [cameraInitialized, setCameraInitialized] = useState(false);
-    const [autoRotateSpeed, setAutoRotateSpeed] = useState(0);
-
-    // useEffect(() => {
-    //     statsRef.current.showPanel(0);
-    //     document.body.appendChild(statsRef.current.dom);
-
-    //     // Stats 패널을 우측 상단에 배치하기 위한 스타일 설정
-    //     const statsElement = statsRef.current.dom;
-    //     statsElement.style.position = "absolute";
-    //     statsElement.style.top = "0px";
-    //     statsElement.style.right = "0px";
-    //     statsElement.style.left = "auto"; // 기본 left 속성 제거
-
-    //     return () => {
-    //         document.body.removeChild(statsRef.current.dom);
-    //     };
-    // }, []);
-
+function RendererSetup() {
+    const gl = useThree((state) => state.gl);
     useEffect(() => {
-        // Canvas 컨테이너 요소 찾기
-        const canvas = gl.domElement;
-        const canvasContainer = canvas.parentElement;
-        canvasContainerRef.current = canvasContainer;
+        gl.toneMapping = THREE.ACESFilmicToneMapping;
+        gl.toneMappingExposure = 1;
+        gl.outputColorSpace = THREE.SRGBColorSpace;
+    }, [gl]);
+    return null;
+}
 
-        // Stats 초기화
-        statsRef.current.showPanel(0);
-
-        // Stats를 Canvas 컨테이너에 추가
-        canvasContainer.appendChild(statsRef.current.dom);
-
-        // 컨테이너를 relative로 만들고, Stats는 absolute로 배치
-        canvasContainer.style.position = "relative";
-
-        const statsElement = statsRef.current.dom;
-        statsElement.style.position = "absolute";
-        statsElement.style.top = "0px";
-        statsElement.style.right = "0px";
-        statsElement.style.left = "auto";
-        statsElement.style.zIndex = "100"; // Canvas 위에 표시되도록 z-index 설정
-
+function StatsOverlay() {
+    const gl = useThree((state) => state.gl);
+    const stats = useRef(null);
+    useEffect(() => {
+        const panel = new Stats();
+        panel.showPanel(0);
+        const parent = gl.domElement.parentElement;
+        if (!parent) return undefined;
+        parent.style.position = "relative";
+        const el = panel.dom;
+        el.style.position = "absolute";
+        el.style.top = "0px";
+        el.style.right = "0px";
+        el.style.left = "auto";
+        el.style.zIndex = "100";
+        parent.appendChild(el);
+        stats.current = panel;
         return () => {
-            // 컴포넌트 언마운트 시 Stats 제거
-            if (
-                canvasContainerRef.current &&
-                statsRef.current.dom.parentElement ===
-                    canvasContainerRef.current
-            ) {
-                canvasContainerRef.current.removeChild(statsRef.current.dom);
-            }
+            if (el.parentElement) el.parentElement.removeChild(el);
         };
     }, [gl]);
     useFrame(() => {
-        statsRef.current.update();
-
-        // 카메라 초기화 확인
-        if (!cameraInitialized && camera && controlsRef.current) {
-            if (
-                isNaN(camera.position.x) ||
-                isNaN(camera.position.y) ||
-                isNaN(camera.position.z)
-            ) {
-                // camera.position.set(2000, 2000, 2000);
-                camera.position.set(400, 400, 500);
-            }
-            controlsRef.current.target.set(127.5, 127.5, 127.5);
-            controlsRef.current.update();
-            setCameraInitialized(true);
-        }
-
-        // 카메라가 너무 멀어졌는지 확인하고 제한
-        if (controlsRef.current) {
-            const distance = camera.position.distanceTo(
-                new THREE.Vector3(127.5, 127.5, 127.5)
-            );
-
-            // 거리가 최대 거리를 초과하는 경우
-            if (distance > 800) {
-                // 방향 벡터 계산
-                const direction = new THREE.Vector3()
-                    .subVectors(
-                        camera.position,
-                        new THREE.Vector3(127.5, 127.5, 127.5)
-                    )
-                    .normalize();
-
-                // 최대 거리에 맞게 위치 조정
-                camera.position.copy(
-                    new THREE.Vector3(127.5, 127.5, 127.5).add(
-                        direction.multiplyScalar(800)
-                    )
-                );
-
-                controlsRef.current.update();
-            }
-        }
-        // 디버깅: 카메라 위치와 타겟 로그 출력
-        // console.log("Camera Position:", camera.position);
-        // console.log("Controls Target:", controlsRef.current?.target);
+        stats.current?.update();
     });
+    return null;
+}
 
-    useEffect(() => {
-        gl.toneMapping = THREE.ACESFilmicToneMapping;
-        gl.toneMappingExposure = 1.0;
-        gl.outputColorSpace = THREE.SRGBColorSpace;
+function cubeEdgeGeometry() {
+    const positions = new Float32Array([
+        0, 0, 0, 255, 0, 0, 0, 0, 255, 255, 0, 255, 0, 255, 0, 255, 255, 0, 0, 255, 255, 255,
+        255, 255, 0, 0, 0, 0, 255, 0, 255, 0, 0, 255, 255, 0, 0, 0, 255, 0, 255, 255, 255, 0,
+        255, 255, 255, 255, 0, 0, 0, 0, 0, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255,
+        255, 255, 0, 255, 255, 255,
+    ]);
+    const colors = new Float32Array(positions.length);
+    const vertexColors = {
+        "0,0,0": [0, 0, 0],
+        "255,0,0": [1, 0, 0],
+        "0,255,0": [0, 1, 0],
+        "0,0,255": [0, 0, 1],
+        "255,255,0": [1, 1, 0],
+        "255,0,255": [1, 0, 1],
+        "0,255,255": [0, 1, 1],
+        "255,255,255": [1, 1, 1],
+    };
+    for (let i = 0; i < positions.length / 3; i += 2) {
+        const startKey = `${positions[i * 3]},${positions[i * 3 + 1]},${positions[i * 3 + 2]}`;
+        const endKey = `${positions[(i + 1) * 3]},${positions[(i + 1) * 3 + 1]},${positions[(i + 1) * 3 + 2]}`;
+        const start = vertexColors[startKey];
+        const end = vertexColors[endKey];
+        if (!start || !end) continue;
+        colors[i * 3] = start[0];
+        colors[i * 3 + 1] = start[1];
+        colors[i * 3 + 2] = start[2];
+        colors[(i + 1) * 3] = end[0];
+        colors[(i + 1) * 3 + 1] = end[1];
+        colors[(i + 1) * 3 + 2] = end[2];
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    return geometry;
+}
 
-        // 장면 초기화: 모든 기존 객체 제거
-        while (scene.children.length > 0) {
-            scene.remove(scene.children[0]);
-        }
+function linearHsv(h, s, v) {
+    const [r, g, b] = hsvToRgb(h, s, v);
+    return [srgbToLinear(r), srgbToLinear(g), srgbToLinear(b)];
+}
 
-        // 큐브 생성
-        const edgesGeometry = new THREE.BufferGeometry();
-        // X축 방향 (앞면과 뒷면)
-        //  [0,0,0] - 검은색 → [255,0,0] - 빨간색
-        //  [0,255,0] - 녹색 → [255,255,0] - 노란색
-        //  [0,0,255] - 파란색 → [255,0,255] - 자홍색
-        //  [0,255,255] - 청록색 → [255,255,255] - 흰색
-        // Y축 방향 (왼쪽면과 오른쪽면)
-        //  [0,0,0] - 검은색 → [0,255,0] - 녹색
-        //  [255,0,0] - 빨간색 → [255,255,0] - 노란색
-        //  [0,0,255] - 파란색 → [0,255,255] - 청록색
-        //  [255,0,255] - 자홍색 → [255,255,255] - 흰색
-        // Z축 방향 (위쪽면과 아래쪽면)
-        //  [0,0,0] - 검은색 → [0,0,255] - 파란색
-        //  [255,0,0] - 빨간색 → [255,0,255] - 자홍색
-        //  [0,255,0] - 녹색 → [0,255,255] - 청록색
-        //  [255,255,0] - 노란색 → [255,255,255] - 흰색
-        const positions = new Float32Array([
-            0, 0, 0, 255, 0, 0, 0, 0, 255, 255, 0, 255, 0, 255, 0, 255, 255, 0,
-            0, 255, 255, 255, 255, 255, 0, 0, 0, 0, 255, 0, 255, 0, 0, 255, 255,
-            0, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 255, 255, 0, 0, 0, 0,
-            0, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0,
-            255, 255, 255,
-        ]);
-        edgesGeometry.setAttribute(
-            "position",
-            new THREE.BufferAttribute(positions, 3)
-        );
+function pushSegment(positions, colors, a, b, ca, cb) {
+    positions.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+    colors.push(ca[0], ca[1], ca[2], cb[0], cb[1], cb[2]);
+}
 
-        const colors = new Float32Array(positions.length);
-        const vertexColors = {
-            "0,0,0": new THREE.Color(0, 0, 0), // 검은색
-            "255,0,0": new THREE.Color(1, 0, 0), // 빨간색
-            "0,255,0": new THREE.Color(0, 1, 0), // 초록색
-            "0,0,255": new THREE.Color(0, 0, 1), // 파란색
-            "255,255,0": new THREE.Color(1, 1, 0), // 노란색
-            "255,0,255": new THREE.Color(1, 0, 1), // 자홍색
-            "0,255,255": new THREE.Color(0, 1, 1), // 청록색
-            "255,255,255": new THREE.Color(1, 1, 1), // 흰색
-        };
-
-        for (let i = 0; i < positions.length / 3; i += 2) {
-            const startX = positions[i * 3];
-            const startY = positions[i * 3 + 1];
-            const startZ = positions[i * 3 + 2];
-            const endX = positions[(i + 1) * 3];
-            const endY = positions[(i + 1) * 3 + 1];
-            const endZ = positions[(i + 1) * 3 + 2];
-
-            const startKey = `${Math.round(startX)},${Math.round(
-                startY
-            )},${Math.round(startZ)}`;
-            const endKey = `${Math.round(endX)},${Math.round(
-                endY
-            )},${Math.round(endZ)}`;
-
-            const startColor = vertexColors[startKey];
-            const endColor = vertexColors[endKey];
-
-            if (!startColor || !endColor) {
-                console.error(`Color missing for keys: ${startKey}, ${endKey}`);
-                continue;
-            }
-            colors[i * 3] = startColor.r;
-            colors[i * 3 + 1] = startColor.g;
-            colors[i * 3 + 2] = startColor.b;
-            colors[(i + 1) * 3] = endColor.r;
-            colors[(i + 1) * 3 + 1] = endColor.g;
-            colors[(i + 1) * 3 + 2] = endColor.b;
-        }
-        edgesGeometry.setAttribute(
-            "color",
-            new THREE.BufferAttribute(colors, 3)
-        );
-
-        const edgesMaterial = new THREE.LineBasicMaterial({
-            vertexColors: true,
-        });
-        edgesRef.current = new THREE.LineSegments(edgesGeometry, edgesMaterial);
-        scene.add(edgesRef.current);
-
-        // 샘플 점 렌더링 (좌표 스케일링, 매번 업데이트)
-        // The cloud is capped so a large sample cannot allocate a buffer the
-        // tab cannot keep, which would take the whole page down with it.
-        const cloud = points.length > 8000 ? points.slice(0, 8000) : points;
-        if (cloud.length > 0) {
-            const positions = new Float32Array(cloud.length * 3);
-            const colors = new Float32Array(cloud.length * 3);
-
-            cloud.forEach((p, idx) => {
-                positions[idx * 3] = p[0] * 255;
-                positions[idx * 3 + 1] = p[1] * 255;
-                positions[idx * 3 + 2] = p[2] * 255;
-
-                const color = new THREE.Color(
-                    p[0],
-                    p[1],
-                    p[2]
-                ).convertSRGBToLinear();
-                colors[idx * 3] = color.r;
-                colors[idx * 3 + 1] = color.g;
-                colors[idx * 3 + 2] = color.b;
-            });
-
-            const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute(
-                "position",
-                new THREE.BufferAttribute(positions, 3)
+function hsvGuideGeometry(shape) {
+    const positions = [];
+    const colors = [];
+    const segments = 72;
+    const spokes = 12;
+    const black = [0, 0, 0];
+    const ring = (y, value) => {
+        for (let i = 0; i < segments; i++) {
+            const a0 = (i / segments) * Math.PI * 2;
+            const a1 = ((i + 1) / segments) * Math.PI * 2;
+            const p0 = [HSV_CENTER + Math.cos(a0) * HSV_RADIUS, y, HSV_CENTER + Math.sin(a0) * HSV_RADIUS];
+            const p1 = [HSV_CENTER + Math.cos(a1) * HSV_RADIUS, y, HSV_CENTER + Math.sin(a1) * HSV_RADIUS];
+            const h0 = (a0 * 180) / Math.PI;
+            const h1 = (a1 * 180) / Math.PI;
+            pushSegment(
+                positions,
+                colors,
+                p0,
+                p1,
+                value <= 0 ? black : linearHsv(h0, 1, value),
+                value <= 0 ? black : linearHsv(h1, 1, value)
             );
-            geometry.setAttribute(
-                "color",
-                new THREE.BufferAttribute(colors, 3)
-            );
+        }
+    };
 
-            const material = new THREE.PointsMaterial({
+    if (shape === "cylinder") {
+        ring(HSV_HEIGHT, 1);
+        ring(0, 0);
+        for (let i = 0; i < spokes; i++) {
+            const angle = (i / spokes) * Math.PI * 2;
+            const x = HSV_CENTER + Math.cos(angle) * HSV_RADIUS;
+            const z = HSV_CENTER + Math.sin(angle) * HSV_RADIUS;
+            const hue = (angle * 180) / Math.PI;
+            pushSegment(positions, colors, [x, 0, z], [x, HSV_HEIGHT, z], black, linearHsv(hue, 1, 1));
+        }
+    } else {
+        ring(HSV_HEIGHT, 1);
+        const tip = [HSV_CENTER, 0, HSV_CENTER];
+        for (let i = 0; i < spokes; i++) {
+            const angle = (i / spokes) * Math.PI * 2;
+            const rim = [
+                HSV_CENTER + Math.cos(angle) * HSV_RADIUS,
+                HSV_HEIGHT,
+                HSV_CENTER + Math.sin(angle) * HSV_RADIUS,
+            ];
+            pushSegment(positions, colors, tip, rim, black, linearHsv((angle * 180) / Math.PI, 1, 1));
+        }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    return geometry;
+}
+
+function RgbFrame() {
+    const geometry = useMemo(() => cubeEdgeGeometry(), []);
+    useEffect(() => () => geometry.dispose(), [geometry]);
+    return (
+        <lineSegments geometry={geometry}>
+            <lineBasicMaterial vertexColors />
+        </lineSegments>
+    );
+}
+
+function HsvFrame({ shape }) {
+    const geometry = useMemo(() => hsvGuideGeometry(shape), [shape]);
+    useEffect(() => () => geometry.dispose(), [geometry]);
+    return (
+        <lineSegments geometry={geometry}>
+            <lineBasicMaterial vertexColors />
+        </lineSegments>
+    );
+}
+
+function Cloud({ cloud, mode, shape }) {
+    const geometry = useMemo(() => new THREE.BufferGeometry(), []);
+    const material = useMemo(
+        () =>
+            new THREE.PointsMaterial({
                 size: 2,
                 vertexColors: true,
                 sizeAttenuation: true,
-            });
+            }),
+        []
+    );
 
-            const pointsMesh = new THREE.Points(geometry, material);
-            scene.add(pointsMesh);
-        } else {
-            console.warn("No points data available");
+    useLayoutEffect(() => {
+        if (!cloud || cloud.count === 0) return;
+        const positions = mode === "hsv" ? (shape === "cylinder" ? cloud.cylinder : cloud.cone) : cloud.rgb;
+        const colorAttr = geometry.getAttribute("color");
+        if (!colorAttr || colorAttr.array !== cloud.linear) {
+            geometry.setAttribute("color", new THREE.BufferAttribute(cloud.linear, 3));
         }
+        const positionAttr = geometry.getAttribute("position");
+        if (!positionAttr || positionAttr.array !== positions) {
+            geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+            geometry.computeBoundingSphere();
+        }
+    }, [cloud, geometry, mode, shape]);
 
-        // Coplanar samples make ConvexGeometry throw. Keep that inside the
-        // scene so the rest of the page stays up.
-        if (cloud.length > 3 && showConvexHull) {
-            try {
-                const hullPoints = cloud.slice(0, 1000);
-                const rgbPoints = hullPoints.map(
-                    (p) => new THREE.Vector3(p[0] * 255, p[1] * 255, p[2] * 255)
-                );
-                const geometry = new ConvexGeometry(rgbPoints);
-                const hullMaterial = new THREE.MeshBasicMaterial({
-                    color: 0xffffff,
-                    wireframe: true,
-                    transparent: true,
-                    opacity: 0.5,
-                });
-                const hullMesh = new THREE.Mesh(geometry, hullMaterial);
-                scene.add(hullMesh);
-            } catch (error) {
-                console.error(error);
+    useLayoutEffect(() => {
+        if (mode === "hsv") {
+            material.size = 1.5;
+            material.opacity = 0.5;
+            material.transparent = true;
+            material.depthWrite = false;
+        } else {
+            material.size = 2;
+            material.opacity = 1;
+            material.transparent = false;
+            material.depthWrite = true;
+        }
+        material.needsUpdate = true;
+    }, [material, mode]);
+
+    useEffect(
+        () => () => {
+            geometry.dispose();
+            material.dispose();
+        },
+        [geometry, material]
+    );
+
+    if (!cloud || cloud.count === 0) return null;
+    return <points geometry={geometry} material={material} frustumCulled={false} />;
+}
+
+function palettePlacement(item, mode, shape) {
+    const [r, g, b] = item.rgb;
+    if (mode === "hsv") {
+        const position = hsvToPosition(rgbToHsv(r, g, b), shape === "cylinder" ? "cylinder" : "cone");
+        return { position, radius: markerRadius(item.share, HSV_SPHERE_MIN, HSV_SPHERE_MAX) };
+    }
+    return { position: [r * 255, g * 255, b * 255], radius: RGB_SPHERE_RADIUS };
+}
+
+function PaletteSpheres({ palette, mode, shape }) {
+    const fill = useRef(null);
+    const outline = useRef(null);
+    const count = palette.length;
+    const geometry = useMemo(() => new THREE.SphereGeometry(1, 20, 14), []);
+    const fillMaterial = useMemo(() => new THREE.MeshBasicMaterial(), []);
+    const outlineMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: "#f4f4f4" }), []);
+
+    useLayoutEffect(() => {
+        const mesh = fill.current;
+        if (!mesh || count === 0) return;
+        const rim = outline.current;
+        const color = new THREE.Color();
+        const dummy = new THREE.Object3D();
+        for (let i = 0; i < count; i++) {
+            const { position, radius } = palettePlacement(palette[i], mode, shape);
+            dummy.position.set(position[0], position[1], position[2]);
+            dummy.scale.setScalar(radius);
+            dummy.updateMatrix();
+            mesh.setMatrixAt(i, dummy.matrix);
+            color.setRGB(palette[i].rgb[0], palette[i].rgb[1], palette[i].rgb[2]);
+            color.convertSRGBToLinear();
+            mesh.setColorAt(i, color);
+            if (rim) {
+                dummy.scale.setScalar(radius * 1.2);
+                dummy.updateMatrix();
+                rim.setMatrixAt(i, dummy.matrix);
             }
         }
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        if (rim) rim.instanceMatrix.needsUpdate = true;
+    }, [count, mode, palette, shape]);
 
-        // 축 도우미 및 값 표시 (한 번만 실행)
-        if (scene.children.length === 1) {
-            // edges만 있을 때 추가
-            const axesHelper = new THREE.AxesHelper(255);
-            scene.add(axesHelper);
+    useEffect(
+        () => () => {
+            geometry.dispose();
+            fillMaterial.dispose();
+            outlineMaterial.dispose();
+        },
+        [fillMaterial, geometry, outlineMaterial]
+    );
 
-            const createLabel = (text, position) => {
-                const canvas = document.createElement("canvas");
-                canvas.width = 128;
-                canvas.height = 128;
-                const ctx = canvas.getContext("2d");
-                ctx.fillStyle = "white";
-                ctx.font = "40px Arial";
-                ctx.textAlign = "center";
-                ctx.fillText(text, 64, 80);
-                const texture = new THREE.CanvasTexture(canvas);
-                const spriteMaterial = new THREE.SpriteMaterial({
-                    map: texture,
-                });
-                const sprite = new THREE.Sprite(spriteMaterial);
-                sprite.scale.set(5, 5, 5);
-                sprite.position.copy(position);
-                return sprite;
-            };
-            scene.add(createLabel("0", new THREE.Vector3(0, 0, 0)));
-            scene.add(createLabel("255", new THREE.Vector3(255, 0, 0)));
-            scene.add(createLabel("255", new THREE.Vector3(0, 255, 0)));
-            scene.add(createLabel("255", new THREE.Vector3(0, 0, 255)));
-            scene.add(createLabel("127.5", new THREE.Vector3(127.5, 0, 0)));
-            scene.add(createLabel("127.5", new THREE.Vector3(0, 127.5, 0)));
-            scene.add(createLabel("127.5", new THREE.Vector3(0, 0, 127.5)));
-        }
+    if (count === 0) return null;
+    return (
+        <group>
+            {mode === "hsv" && (
+                <instancedMesh
+                    key={`rim-${count}`}
+                    ref={outline}
+                    args={[geometry, outlineMaterial, count]}
+                    frustumCulled={false}
+                />
+            )}
+            <instancedMesh
+                key={`fill-${count}`}
+                ref={fill}
+                args={[geometry, fillMaterial, count]}
+                frustumCulled={false}
+            />
+        </group>
+    );
+}
 
-        // 클러스터 중심 렌더링 (매번 업데이트)
-        if (clusters.length > 0) {
-            // 기존 클러스터 제거
-            scene.children
-                .filter(
-                    (child) =>
-                        child instanceof THREE.Mesh &&
-                        child.geometry.type === "SphereGeometry" &&
-                        child.scale.x === 3.825
-                )
-                .forEach((child) => scene.remove(child));
+function buildHull(cloud) {
+    if (!cloud || cloud.count < 4) return null;
+    const stride = Math.max(1, Math.ceil(cloud.count / HULL_POINT_CAP));
+    const points = [];
+    const rgb = cloud.rgb;
+    for (let i = 0; i < cloud.count; i += stride) {
+        points.push(new THREE.Vector3(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]));
+    }
+    if (points.length < 4) return null;
+    try {
+        const geometry = new ConvexGeometry(points);
+        const material = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.5,
+        });
+        return new THREE.Mesh(geometry, material);
+    } catch (error) {
+        console.error(error);
+        return null;
+    }
+}
 
-            clusters.forEach((c, idx) => {
-                const geometry = new THREE.SphereGeometry(3.825, 16, 16);
-                const color = new THREE.Color(
-                    c[0],
-                    c[1],
-                    c[2]
-                ).convertSRGBToLinear();
-                const material = new THREE.MeshBasicMaterial({ color });
-                const sphere = new THREE.Mesh(geometry, material);
-                sphere.position.set(c[0] * 255, c[1] * 255, c[2] * 255);
-                scene.add(sphere);
-                // console.log(
-                //     `클러스터 중심 ${idx} RGB (Linear): [${color.r.toFixed(
-                //         2
-                //     )}, ${color.g.toFixed(2)}, ${color.b.toFixed(2)}]`
-                // );
-            });
-        }
-
-        return () => {
-            // edges는 유지, 다른 객체는 다음 렌더링에서 갱신
-        };
-    }, [points, clusters, scene, camera, gl, showConvexHull]); // points와 clusters 변경 시 전체 재렌더링
-
+function ConvexHull({ cloud }) {
+    const mesh = useMemo(() => buildHull(cloud), [cloud]);
     useEffect(() => {
-        const controls = controlsRef.current;
-        if (controls) {
-            // controls.minDistance = 150; // 최소 거리 큐브 밖으로
-            // controls.maxDistance = 2000; // 최대 거리 증가
-            // controls.minPolarAngle = 0;
-            // controls.maxPolarAngle = Math.PI;
-            // controls.enablePan = true;
-            // controls.update(); // 초기 업데이트 강제 실행
-            controls.minDistance = 150; // 최소 거리 (너무 가까이 가지 않도록)
-            controls.maxDistance = 800; // 최대 거리 (너무 멀어지지 않도록)
-            controls.minPolarAngle = 0; // 위쪽 제한 없음
-            controls.maxPolarAngle = Math.PI; // 아래쪽 제한 없음
-            controls.enablePan = true; // 패닝 활성화
-            controls.rotateSpeed = 0.8; // 회전 속도 조정
-            controls.zoomSpeed = 1.0; // 줌 속도
-            controls.panSpeed = 0.8; // 패닝 속도
-            controls.update(); // 초기 업데이트 강제 실행
-        }
+        if (!mesh) return undefined;
+        return () => {
+            mesh.geometry.dispose();
+            mesh.material.dispose();
+        };
+    }, [mesh]);
+    if (!mesh) return null;
+    return <primitive object={mesh} />;
+}
+
+function SceneContent({ cloud, palette, mode, shape, showConvexHull, enableDamping }) {
+    const controls = useRef(null);
+    useEffect(() => {
+        const orbit = controls.current;
+        if (!orbit) return;
+        orbit.target.set(HSV_CENTER, HSV_CENTER, HSV_CENTER);
+        orbit.minDistance = 150;
+        orbit.maxDistance = 800;
+        orbit.enablePan = true;
+        orbit.rotateSpeed = 0.8;
+        orbit.zoomSpeed = 1;
+        orbit.panSpeed = 0.8;
+        orbit.update();
     }, []);
 
     return (
         <>
-            <OrbitControls
-                ref={controlsRef}
-                enableDamping={enableDamping}
-                dampingFactor={0.05}
-                autoRotate={false}
-            />
-            <perspectiveCamera
-                position={[2000, 2000, 2000]} // 더 멀리 설정 (기존: 1500, 1500, 1500)
-                lookAt={[127.5, 127.5, 127.5]}
-                near={1}
-                far={2000} // far 값을 증가시켜 더 멀리 볼 수 있도록 (기존: 2000)
-            />
+            <RendererSetup />
+            <StatsOverlay />
+            <OrbitControls ref={controls} enableDamping={!!enableDamping} dampingFactor={0.05} />
+            {mode === "hsv" ? <HsvFrame shape={shape} /> : <RgbFrame />}
+            <Cloud cloud={cloud} mode={mode} shape={shape} />
+            <PaletteSpheres palette={palette} mode={mode} shape={shape} />
+            {mode === "rgb" && showConvexHull && <ConvexHull cloud={cloud} />}
         </>
     );
 }
 
 export default function Scene({
-    points,
-    clusters,
-    enableDamping,
-    showConvexHull,
+    cloud,
+    palette,
+    mode = "rgb",
+    shape = "cone",
+    showConvexHull = false,
+    enableDamping = false,
 }) {
     return (
         <Canvas
-            style={{
-                width: "100%",
-                height: "260px",
-                margin: "0 auto",
-                background: "#808080",
-            }}
+            style={{ width: "100%", height: "260px", margin: "0 auto", background: "#808080" }}
             gl={{ antialias: true }}
-            camera={{
-                position: [400, 400, 500],
-                fov: 50, // 시야각 좁게 설정
-                near: 1,
-                far: 2000,
-            }}
+            camera={{ position: [400, 400, 500], fov: 50, near: 1, far: 2000 }}
         >
             <SceneContent
-                points={points}
-                clusters={clusters}
-                enableDamping={enableDamping}
+                cloud={cloud}
+                palette={palette}
+                mode={mode}
+                shape={shape}
                 showConvexHull={showConvexHull}
+                enableDamping={enableDamping}
             />
         </Canvas>
     );
