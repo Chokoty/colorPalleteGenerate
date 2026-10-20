@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect, useCallback, Component } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, Component } from "react";
 import Scene from "./Scene";
+import ColorWheel from "./ColorWheel";
+import { useColorCloud } from "./useColorCloud";
 import {
     DELTA_E_STOP,
     extractPaletteFromImageData,
@@ -23,7 +25,6 @@ import { addPick, centersWithPicks, pickAt, removePick, restorePicks, rgb01ToHex
 // plus one object per pixel, is what blanks the tab. Pictures under this cap
 // still use the full unique-color sample.
 const MAX_UNIQUE_SAMPLES = 200000;
-const SCENE_POINT_CAP = 5000;
 const LAYER_PREVIEW_MAX = 480;
 
 function collectColorSample(data, width, height) {
@@ -63,16 +64,6 @@ function collectColorSample(data, width, height) {
         }
     }
     return { values, truncated, seen };
-}
-
-function sceneCloud(sampled) {
-    if (sampled.length <= SCENE_POINT_CAP) return sampled.map((point) => point.rgb);
-    const step = Math.ceil(sampled.length / SCENE_POINT_CAP);
-    const cloud = [];
-    for (let i = 0; i < sampled.length && cloud.length < SCENE_POINT_CAP; i += step) {
-        cloud.push(sampled[i].rgb);
-    }
-    return cloud;
 }
 
 function rgbAssignCluster(point, centers, colorWeight, spatialWeight) {
@@ -220,17 +211,6 @@ function paletteCenters(palette) {
         rgb: [rgb[0] / 255, rgb[1] / 255, rgb[2] / 255],
         xy: [0.5, 0.5],
     }));
-}
-
-function viewSamples(uniqueColors) {
-    if (!uniqueColors || uniqueColors.length === 0) return [];
-    const step = Math.max(1, Math.floor(uniqueColors.length / SCENE_POINT_CAP));
-    const sampled = [];
-    for (let i = 0; i < uniqueColors.length && sampled.length < SCENE_POINT_CAP; i += step) {
-        const [r, g, b] = uniqueColors[i];
-        sampled.push([r / 255, g / 255, b / 255]);
-    }
-    return sampled;
 }
 
 // Share of opaque pixels (alpha ≥ 128) assigned to each swatch, plus one
@@ -413,7 +393,6 @@ class PreviewBoundary extends Component {
 function App() {
     const [mode, setMode] = useState("auto");
     const [imageData, setImageData] = useState(null);
-    const [samplePoints, setSamplePoints] = useState([]);
     const [clusters, setClusters] = useState([]);
     const [recolorTime, setRecolorTime] = useState(0);
     const [layerImages, setLayerImages] = useState([]);
@@ -424,6 +403,9 @@ function App() {
     const [opaqueShares, setOpaqueShares] = useState([]);
     const [deltaEStop, setDeltaEStop] = useState(DELTA_E_STOP);
     const [showConvexHull, setShowConvexHull] = useState(true);
+    const [distTab, setDistTab] = useState("rgb");
+    const [hsvShape, setHsvShape] = useState("cone");
+    const [wheelValue, setWheelValue] = useState(0.75);
     const [showLines, setShowLines] = useState(false);
     const [inkNote, setInkNote] = useState("");
     const [dragActive, setDragActive] = useState(false);
@@ -454,6 +436,15 @@ function App() {
     const debounceTimeoutRef = useRef(null);
     const weightDebounceRef = useRef(null);
     const imageRef = useRef(null);
+    const colorCloud = useColorCloud(uploadId, imageRef);
+    const distributionPalette = useMemo(() => {
+        const items = [];
+        clusters.forEach((center, index) => {
+            if (!center?.rgb) return;
+            items.push({ rgb: center.rgb, share: opaqueShares[index] ?? 0 });
+        });
+        return items;
+    }, [clusters, opaqueShares]);
     const previewRef = useRef(null);
     const previewCanvasRef = useRef(null);
     const inkRequestRef = useRef(0);
@@ -592,7 +583,6 @@ function App() {
                 );
             }
             manualSamplesRef.current = sampled;
-            setSamplePoints(sceneCloud(sampled));
         }
         const extracted = kMeansClustering(sampled, count, nextColor, nextSpatial, 50);
         if (extracted.length === 0) {
@@ -637,7 +627,6 @@ function App() {
         const palette = paletteCenters(extracted.palette);
         if (palette.length === 0) {
             clusterIdsRef.current = null;
-            setSamplePoints([]);
             setClusters([]);
             setOpaqueShares([]);
             setClusterPositions([]);
@@ -648,7 +637,6 @@ function App() {
         const centers = centersWithPicks(palette, pickedPointsRef.current, width, height);
         const ids = idsFor(stored);
         assignLabIds(data, width, height, centers, nextColor, nextSpatial, ids, true);
-        setSamplePoints(viewSamples(extracted.uniqueColors));
         setClusters(centers);
         const orig = centers.filter((center) => !center.pickId).map((c) => ({ ...c, rgb: [...c.rgb] }));
         originalClustersRef.current = orig;
@@ -748,7 +736,6 @@ function App() {
                     if (serial !== loadSerialRef.current) return;
                     console.error(error);
                     setClusters([]);
-                    setSamplePoints([]);
                     setLayerImages([]);
                     setLoadError("이미지를 처리하지 못했습니다.");
                     setIsLoadingImage(false);
@@ -1602,23 +1589,88 @@ function App() {
                             )}
                         </div>
                     )}
-                    {samplePoints.length > 0 && mode !== "study" && (
+                    {imageData && mode !== "study" && (
                         <details className="scene-block">
                             <summary>색 분포</summary>
+                            <div className="scene-tabs" role="tablist" aria-label="색 분포 보기">
+                                <button
+                                    type="button"
+                                    className="mode-tab"
+                                    role="tab"
+                                    aria-selected={distTab === "rgb"}
+                                    onClick={() => setDistTab("rgb")}
+                                >
+                                    RGB
+                                </button>
+                                <button
+                                    type="button"
+                                    className="mode-tab"
+                                    role="tab"
+                                    aria-selected={distTab === "hsv"}
+                                    onClick={() => setDistTab("hsv")}
+                                >
+                                    HSV 3D
+                                </button>
+                                <button
+                                    type="button"
+                                    className="mode-tab"
+                                    role="tab"
+                                    aria-selected={distTab === "wheel"}
+                                    onClick={() => setDistTab("wheel")}
+                                >
+                                    색상환
+                                </button>
+                            </div>
                             <p>재색상화 시간: {recolorTime}ms</p>
-                            <Scene
-                                points={samplePoints}
-                                clusters={clusters.filter((c) => c?.rgb).map((c) => c.rgb)}
-                                showConvexHull={showConvexHull}
-                            />
-                            <label className="scene-hull-toggle">
-                                <input
-                                    type="checkbox"
-                                    checked={showConvexHull}
-                                    onChange={(e) => setShowConvexHull(e.target.checked)}
-                                />
-                                Show Convex Hull
-                            </label>
+                            {!colorCloud && <p className="scene-pending">색 분포를 계산하는 중</p>}
+                            <div className="scene-view">
+                                {distTab === "wheel" ? (
+                                    <ColorWheel
+                                        cloud={colorCloud}
+                                        palette={distributionPalette}
+                                        value={wheelValue}
+                                        onValue={setWheelValue}
+                                    />
+                                ) : (
+                                    <Scene
+                                        cloud={colorCloud}
+                                        palette={distributionPalette}
+                                        mode={distTab === "hsv" ? "hsv" : "rgb"}
+                                        shape={hsvShape}
+                                        showConvexHull={distTab === "rgb" && showConvexHull}
+                                    />
+                                )}
+                            </div>
+                            {distTab === "rgb" && (
+                                <label className="scene-hull-toggle">
+                                    <input
+                                        type="checkbox"
+                                        checked={showConvexHull}
+                                        onChange={(e) => setShowConvexHull(e.target.checked)}
+                                    />
+                                    Show Convex Hull
+                                </label>
+                            )}
+                            {distTab === "hsv" && (
+                                <div className="scene-shape-toggle" role="group" aria-label="HSV 입체">
+                                    <button
+                                        type="button"
+                                        className="mode-tab"
+                                        aria-pressed={hsvShape === "cone"}
+                                        onClick={() => setHsvShape("cone")}
+                                    >
+                                        원뿔
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="mode-tab"
+                                        aria-pressed={hsvShape === "cylinder"}
+                                        onClick={() => setHsvShape("cylinder")}
+                                    >
+                                        원기둥
+                                    </button>
+                                </div>
+                            )}
                         </details>
                     )}
                     {mode === "manual" && (
