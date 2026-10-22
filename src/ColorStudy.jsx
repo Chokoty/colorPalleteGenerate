@@ -20,7 +20,7 @@ export function StudyControls({ study, samples, activeSampleId, onOpenSample }) 
                 <li>아래 예시 중 하나를 고르거나, 왼쪽에서 그림을 올립니다.</li>
                 <li>스포이드로 그림의 밝은 부분을 집으면 그 색이 빛 색이 됩니다.</li>
                 <li>가운데는 그 빛을 뺀 밑색입니다. 구분선을 옮겨 원본과 비교합니다.</li>
-                <li>위 레이어에서 밑색, 그림자, 빛을 켜고 끕니다.</li>
+                <li>오른쪽 목록에서 밑색, 그림자, 빛을 켜고 끕니다.</li>
             </ol>
             <div className="sample-picker" role="group" aria-label="예시 그림">
                 {samples.map((sample) => (
@@ -162,7 +162,7 @@ export function StudyControls({ study, samples, activeSampleId, onOpenSample }) 
 
 function studyHint(study) {
     if (study.view === "compose") {
-        return "밑색 위에 그림자와 빛을 다시 겹친 모습입니다. 위쪽 레이어에서 하나씩 켜고 끄세요.";
+        return "밑색 위에 그림자와 빛을 다시 겹친 모습입니다. 오른쪽 목록에서 하나씩 켜고 끄세요.";
     }
     if (study.view === "reverse") {
         return `밑색에 빛 색 ${study.lightHex}을 다시 곱한 색입니다. 빛을 빼기 전과 비슷해집니다.`;
@@ -177,7 +177,7 @@ export function StudySummary({ study }) {
     if (!study.analysis) return null;
     return (
         <div className="palette-summary">
-            <div className="stat-count">{study.analysis.bases.length} base colors</div>
+            <div className="stat-count">밑색 {study.analysis.bases.length}개</div>
             <div className="stat-sub">
                 분해 {study.analysis.ms}ms
                 {study.analysis.bases.length < study.baseCount

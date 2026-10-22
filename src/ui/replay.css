@@ -146,7 +146,7 @@
     background: transparent;
     color: var(--replay-text);
     border-color: var(--replay-text);
-    box-shadow: 0 var(--press) 0 var(--replay-text);
+    box-shadow: none;
 }
 
 .replay-panel .mode-tab:hover,
@@ -165,8 +165,8 @@
 .replay-panel .ink-btn[aria-pressed="true"] {
     background: var(--replay-text);
     color: var(--replay-bg);
-    transform: translateY(var(--press));
-    box-shadow: 0 0 0 var(--replay-text);
+    transform: none;
+    box-shadow: none;
 }
 
 .replay-panel .settings-panel-apply-btn:disabled,
@@ -174,7 +174,7 @@
     color: var(--replay-muted);
     border-color: var(--replay-line);
     background: transparent;
-    box-shadow: 0 var(--press) 0 var(--replay-line);
+    box-shadow: none;
 }
 
 .replay-panel input[type="range"] {

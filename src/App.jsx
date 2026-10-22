@@ -471,7 +471,6 @@ function App() {
     const [replayOpen, setReplayOpen] = useState(false);
     const [replayMenu, setReplayMenu] = useState(false);
     const [svgReplay, setSvgReplay] = useState(false);
-    const [layersOpen, setLayersOpen] = useState(true);
     const [studyOpen, setStudyOpen] = useState(true);
     const [activeSampleId, setActiveSampleId] = useState(null);
     const loadSerialRef = useRef(0);
@@ -1371,16 +1370,6 @@ function App() {
         </div>
     );
 
-    const drawLabel = centerTab === "svg" ? "SVG" : mode === "study" ? "STUDY" : "PALETTE";
-    const drawTime =
-        mode === "study"
-            ? study.analysis
-                ? `${study.analysis.ms}MS`
-                : ""
-            : recolorTime
-              ? `${recolorTime}MS`
-              : "";
-
     const exitReplay = () => {
         setReplayOpen(false);
         setReplayMenu(false);
@@ -1409,15 +1398,16 @@ function App() {
     const renderModeTabs = (includeStudy = false) => (
         <div role="tablist" className="mode-tabs" aria-label="추출 방식">
             {[
-                ["auto", "자동 추출"],
-                ["manual", "직접 설정"],
-                ...(includeStudy ? [["study", "채색 공부"]] : []),
-            ].map(([id, label]) => (
+                ["auto", "자동 추출", "그림에서 대표 색을 자동으로 뽑습니다"],
+                ["manual", "직접 설정", "색 개수와 가중치를 직접 정합니다"],
+                ...(includeStudy ? [["study", "채색 공부", "빛을 빼서 밑색을 봅니다"]] : []),
+            ].map(([id, label, hint]) => (
                 <button
                     key={id}
                     type="button"
                     role="tab"
                     aria-selected={mode === id}
+                    title={hint}
                     onClick={() => switchMode(id)}
                     className={`mode-tab${mode === id ? " mode-tab-active" : ""}`}
                 >
@@ -1447,7 +1437,7 @@ function App() {
                     className={`mode-tab${centerTab === "recolor" ? " mode-tab-active" : ""}`}
                     onClick={() => openCenter("recolor")}
                 >
-                    재색상
+                    다시 칠하기
                 </button>
             )}
             <button
@@ -1475,7 +1465,7 @@ function App() {
                     onOpenSample={openSample}
                 />
             )}
-            {imageData && centerTab !== "svg" && renderViewTabs()}
+            {replayOpen && imageData && centerTab !== "svg" && renderViewTabs()}
             {imageData && mode === "study" && centerTab !== "svg" && <StudyTools study={study} />}
         </>
     );
@@ -1483,15 +1473,43 @@ function App() {
     return (
         <div className={`app${stageOpen ? " is-replay" : ""}`}>
             {loadError && <p className="load-error">{loadError}</p>}
+            <header className="top">
+                <div className="top-brand">
+                    <h1>컬러 팔레트</h1>
+                    <p>그림을 올리면 색을 뽑고, 그 색으로 다시 칠합니다.</p>
+                </div>
+                <div className="top-actions">
+                    {renderModeTabs(true)}
+                    {imageData && renderViewTabs()}
+                    <button
+                        type="button"
+                        className="mode-tab top-open"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isLoadingImage}
+                    >
+                        그림 열기
+                    </button>
+                </div>
+            </header>
+            {activeSample && (
+                <p className="sample-banner">예시 그림이 열려 있습니다. 내 그림으로 바꾸려면 그림 열기를 누르세요.</p>
+            )}
             <PreviewBoundary resetKey={uploadId}>
             <div className={`workspace${imageData ? " has-image" : ""}`}>
                 <aside className="panel panel-left">
-                    <h1 className="panel-title">
-                        <span className="kicker">Palette</span>
-                        컬러 팔레트 추출기
-                    </h1>
+                    <header className="region-head">
+                        <h2>
+                            <span className="region-index">1</span>
+                            원본
+                        </h2>
+                        <p>
+                            {imageData
+                                ? "올린 그림입니다. 스포이트로 색을 더 집을 수 있습니다."
+                                : "여기에 그림을 놓거나, 위의 그림 열기를 누르세요."}
+                        </p>
+                    </header>
                     <div
-                        className={`drop-zone${dragActive ? " drop-zone-active" : ""}`}
+                        className={`drop-zone${imageData ? " drop-zone-compact" : ""}${dragActive ? " drop-zone-active" : ""}`}
                         onDragOver={(e) => {
                             e.preventDefault();
                             setDragActive(true);
@@ -1512,8 +1530,14 @@ function App() {
                                         d="M5 20q-.825 0-1.413-.588T3 18v-3h2v3h14v-3h2v3q0 .825-.588 1.413T19 20zm6-4V7.85l-2.6 2.6L7 9l5-5l5 5l-1.4 1.45l-2.6-2.6V16z"
                                     />
                                 </svg>
-                                <span className="drop-zone-title">클릭하거나 이미지를 끌어다 놓으세요</span>
-                                <span className="drop-zone-hint">PNG · JPG · WEBP 등 이미지 파일</span>
+                                {imageData ? (
+                                    <span className="drop-zone-title">다른 그림으로 바꾸기</span>
+                                ) : (
+                                    <>
+                                        <span className="drop-zone-title">그림을 여기에 놓기</span>
+                                        <span className="drop-zone-hint">PNG, JPG, WEBP</span>
+                                    </>
+                                )}
                             </>
                         )}
                         <input
@@ -1524,7 +1548,48 @@ function App() {
                             disabled={isLoadingImage}
                         />
                     </div>
-                    {renderModeTabs()}
+                    {mode === "manual" && (
+                        <form
+                            className="settings-panel"
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                applySettings();
+                            }}
+                        >
+                            <p className="region-sub">직접 설정. 이 값으로 색을 다시 나눕니다.</p>
+                            <label>색상 가중치: </label>
+                            <input
+                                type="number"
+                                value={colorWeight}
+                                onChange={(e) => setColorWeight(e.target.value)}
+                                step="0.1"
+                                min="0"
+                            />
+                            <label>공간 가중치: </label>
+                            <input
+                                type="number"
+                                value={spatialWeight}
+                                onChange={(e) => setSpatialWeight(e.target.value)}
+                                step="0.1"
+                                min="0"
+                            />
+                            <label>클러스터 개수: </label>
+                            <input
+                                type="number"
+                                value={clusterCount}
+                                onChange={(e) => setClusterCount(e.target.value)}
+                                step="1"
+                                min="1"
+                            />
+                            <button
+                                type="submit"
+                                className="settings-panel-apply-btn"
+                                disabled={isUpdating || isLoadingImage}
+                            >
+                                {isUpdating ? "적용 중..." : "적용"}
+                            </button>
+                        </form>
+                    )}
                     {imageData && mode !== "study" && (
                         <div className="panel-image">
                             <div className="button-row">
@@ -1537,7 +1602,6 @@ function App() {
                                     스포이트
                                 </button>
                             </div>
-                            <span className="image-frame-label">원본</span>
                             <div
                                 className={`image-with-dots${eyedropper ? " is-picking" : ""}`}
                                 onClick={eyedropper ? addPickFromOriginal : undefined}
@@ -1591,7 +1655,7 @@ function App() {
                     )}
                     {imageData && mode !== "study" && (
                         <details className="scene-block">
-                            <summary>색 분포</summary>
+                            <summary>색이 어디에 모였는지</summary>
                             <div className="scene-tabs" role="tablist" aria-label="색 분포 보기">
                                 <button
                                     type="button"
@@ -1621,7 +1685,7 @@ function App() {
                                     색상환
                                 </button>
                             </div>
-                            <p>재색상화 시간: {recolorTime}ms</p>
+                            <p>다시 칠하는 데 {recolorTime}ms</p>
                             {!colorCloud && <p className="scene-pending">색 분포를 계산하는 중</p>}
                             <div className="scene-view">
                                 {distTab === "wheel" ? (
@@ -1648,7 +1712,7 @@ function App() {
                                         checked={showConvexHull}
                                         onChange={(e) => setShowConvexHull(e.target.checked)}
                                     />
-                                    Show Convex Hull
+                                    겉면 보이기
                                 </label>
                             )}
                             {distTab === "hsv" && (
@@ -1673,50 +1737,22 @@ function App() {
                             )}
                         </details>
                     )}
-                    {mode === "manual" && (
-                        <form
-                            className="settings-panel"
-                            onSubmit={(e) => {
-                                e.preventDefault();
-                                applySettings();
-                            }}
-                        >
-                            <label>색상 가중치: </label>
-                            <input
-                                type="number"
-                                value={colorWeight}
-                                onChange={(e) => setColorWeight(e.target.value)}
-                                step="0.1"
-                                min="0"
-                            />
-                            <label>공간 가중치: </label>
-                            <input
-                                type="number"
-                                value={spatialWeight}
-                                onChange={(e) => setSpatialWeight(e.target.value)}
-                                step="0.1"
-                                min="0"
-                            />
-                            <label>클러스터 개수: </label>
-                            <input
-                                type="number"
-                                value={clusterCount}
-                                onChange={(e) => setClusterCount(e.target.value)}
-                                step="1"
-                                min="1"
-                            />
-                            <button
-                                type="submit"
-                                className="settings-panel-apply-btn"
-                                disabled={isUpdating || isLoadingImage}
-                            >
-                                {isUpdating ? "적용 중..." : "적용"}
-                            </button>
-                        </form>
-                    )}
                 </aside>
 
                 <main className={`panel panel-center${centerTab === "svg" ? " svg-open" : ""}`}>
+                    <header className="region-head">
+                        <h2>
+                            <span className="region-index">2</span>
+                            {centerTab === "svg" ? "선으로 따라 그린 그림" : mode === "study" ? "밑색" : "다시 칠한 그림"}
+                        </h2>
+                        <p>
+                            {centerTab === "svg"
+                                ? "같은 그림을 면과 선으로 따라 그립니다."
+                                : mode === "study"
+                                  ? "구분선 왼쪽은 원본, 오른쪽은 빛을 뺀 색입니다."
+                                  : "1번 그림에서 뽑은 색으로 다시 칠한 결과입니다."}
+                        </p>
+                    </header>
                     <div hidden={centerTab === "svg"}>
                         <ReplayChrome
                             active={replayOpen && centerTab !== "svg"}
@@ -1727,22 +1763,15 @@ function App() {
                             panel={replayOpen && replayMenu ? tools : null}
                         >
                             <div className="device">
-                                <div className="device-kicker">
-                                    <span>
-                                        Draw <strong>{drawLabel}</strong>
-                                    </span>
-                                    {drawTime && <span className="device-time">{drawTime}</span>}
-                                </div>
                                 <div className="device-meta">
                                     {imageData && mode === "study" && <StudySummary study={study} />}
                                     {imageData && mode !== "study" && clusters.length > 0 && (
                                         <div className="palette-summary">
-                                            <div className="stat-count">{clusters.length} swatches</div>
+                                            <div className="stat-count">색 {clusters.length}개</div>
                                             {mode === "auto" && (
-                                                <div className="stat-sub">stop ΔE {Math.round(deltaEStop)}</div>
+                                                <div className="stat-sub">비슷한 색은 한 칸으로 묶었습니다.</div>
                                             )}
-                                            {renderShareBar("top")}
-                                            {isUpdating && <p className="stat-sub">색상 변경 중...</p>}
+                                            {isUpdating && <p className="stat-sub">색을 다시 칠하는 중</p>}
                                         </div>
                                     )}
                                 </div>
@@ -1771,7 +1800,9 @@ function App() {
                                     </div>
                                     {imageData && mode !== "study" && isLandscape && clusters.length > 0 && renderShareBar("bottom")}
                                 </div>
-                                {!replayOpen && <div className="device-controls">{tools}</div>}
+                                {!replayOpen && imageData && mode === "study" && centerTab !== "svg" && (
+                                    <div className="device-controls">{tools}</div>
+                                )}
                             </div>
                         </ReplayChrome>
                     </div>
@@ -1780,10 +1811,8 @@ function App() {
                             <SvgPanel
                                 active={centerTab === "svg"}
                                 uploadId={uploadId}
-                                mode={mode}
                                 image={imageRef.current}
                                 fileName={imageInfo?.name}
-                                onView={openCenter}
                                 onReplayActive={setSvgReplay}
                             />
                         </div>
@@ -1802,20 +1831,23 @@ function App() {
                     )}
                 </main>
 
-                <aside className="panel panel-right" aria-label="레이어와 채색 공부">
-                    <details
-                        className="layer-dock"
-                        open={layersOpen}
-                        onToggle={(event) => setLayersOpen(event.currentTarget.open)}
-                    >
-                        <summary className="dock-summary">
-                            <span className="layer-dock-title">레이어</span>
-                            <span className="dock-summary-hint">{layersOpen ? "눌러서 접기" : "눌러서 펼치기"}</span>
-                        </summary>
+                <aside className="panel panel-right" aria-label={mode === "study" ? "채색 공부" : "뽑은 색"}>
+                    <header className="region-head">
+                        <h2>
+                            <span className="region-index">3</span>
+                            {mode === "study" ? "채색 공부" : "뽑은 색"}
+                        </h2>
+                        <p>
+                            {mode === "study"
+                                ? "빛을 빼서 그림의 밑색을 봅니다."
+                                : "색 칸을 누르면 그 색만 보고, 체크는 보이기입니다."}
+                        </p>
+                    </header>
+                    <div className="layer-list">
                         <div className="dock-body">
                             {!imageData && (
                                 <div className="panel-placeholder panel-placeholder-dark">
-                                    이미지를 올리면 색마다 칸이 생깁니다.
+                                    그림을 올리면 여기에 뽑은 색이 쌓입니다.
                                 </div>
                             )}
                             {imageData && mode === "study" && <StudyLayers study={study} />}
@@ -1843,6 +1875,98 @@ function App() {
                                     </div>
                             </div>
                             )}
+                            {clusters
+                                .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
+                                .filter((item) => item.c?.rgb)
+                                .sort((a, b) => b.share - a.share || a.i - b.i)
+                                .map(({ c, i, share }, orderIndex) => {
+                                    const hex = rgb01ToHex(c.rgb);
+                                    const shown = colorVisible[i] !== false;
+                                    const opacity = colorOpacity[i] ?? 100;
+                                    const isModified = swatchEdited(c, i);
+                                    const colorSolo = solo?.kind === "color" && solo.index === i;
+                                    return (
+                                        <div key={`${mode}-layer-${i}`} className="layer-row-wrapper">
+                                            <div
+                                                className="layer-row"
+                                                data-hidden={shown ? "false" : "true"}
+                                                data-solo={colorSolo ? "true" : "false"}
+                                                onClick={() => toggleSolo({ kind: "color", index: i })}
+                                            >
+                                                <span className="layer-num-badge">{orderIndex + 1}</span>
+                                                {layerImages[i] ? <img src={layerImages[i]} alt="" /> : <span className="layer-thumb" />}
+                                                <span className="layer-name">
+                                                    <span className="layer-name-top">
+                                                        <input
+                                                            className="palette-swatch layer-dot layer-color"
+                                                            type="color"
+                                                            value={hex}
+                                                            title="색 변경"
+                                                            aria-label={`${hex} 색 변경`}
+                                                            onClick={(event) => event.stopPropagation()}
+                                                            onChange={(e) => handleColorChange(i, e)}
+                                                        />
+                                                        <span className="layer-hex">{hex}</span>
+                                                        {isModified && (
+                                                            <button
+                                                                type="button"
+                                                                className="layer-reset-btn"
+                                                                title="원래 색상으로 초기화"
+                                                                onClick={(e) => {
+                                                                    e.preventDefault();
+                                                                    e.stopPropagation();
+                                                                    resetSingleColor(i);
+                                                                }}
+                                                            >
+                                                                ↺
+                                                            </button>
+                                                        )}
+                                                    </span>
+                                                    <span className="layer-share">{share.toFixed(1)}% · {opacity}%</span>
+                                                </span>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={shown}
+                                                    aria-label={`${hex} 표시`}
+                                                    onClick={(event) => event.stopPropagation()}
+                                                    onChange={(e) => {
+                                                        const checked = e.target.checked;
+                                                        setColorVisible((prev) => {
+                                                            const next = clusters.map((_, index) => prev[index] !== false);
+                                                            next[i] = checked;
+                                                            colorVisibleRef.current = next;
+                                                            return next;
+                                                        });
+                                                    }}
+                                                />
+                                            </div>
+                                            {shown && (
+                                                <div className="layer-opacity-row">
+                                                    <input
+                                                        type="range"
+                                                        min="0"
+                                                        max="100"
+                                                        value={opacity}
+                                                        aria-label={`${hex} 불투명도`}
+                                                        onChange={(e) => {
+                                                            const val = Number(e.target.value);
+                                                            setColorOpacity((prev) => {
+                                                                const next = clusters.map((_, idx) => prev[idx] ?? 100);
+                                                                next[i] = val;
+                                                                colorOpacityRef.current = next;
+                                                                return next;
+                                                            });
+                                                        }}
+                                                    />
+                                                    <span>{opacity}%</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            <details className="overlay-tools">
+                                <summary>선과 음영</summary>
+                                <p className="region-sub">그림 위에 겹치는 선과 배경입니다. 뽑은 색은 위 목록입니다.</p>
                             <div className="layer-row-wrapper">
                                 <div
                                     className="layer-row"
@@ -1949,95 +2073,6 @@ function App() {
                                     </div>
                                 )}
                             </div>
-                            {clusters
-                                .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
-                                .filter((item) => item.c?.rgb)
-                                .sort((a, b) => b.share - a.share || a.i - b.i)
-                                .map(({ c, i, share }, orderIndex) => {
-                                    const hex = rgb01ToHex(c.rgb);
-                                    const shown = colorVisible[i] !== false;
-                                    const opacity = colorOpacity[i] ?? 100;
-                                    const isModified = swatchEdited(c, i);
-                                    const colorSolo = solo?.kind === "color" && solo.index === i;
-                                    return (
-                                        <div key={`${mode}-layer-${i}`} className="layer-row-wrapper">
-                                            <div
-                                                className="layer-row"
-                                                data-hidden={shown ? "false" : "true"}
-                                                data-solo={colorSolo ? "true" : "false"}
-                                                onClick={() => toggleSolo({ kind: "color", index: i })}
-                                            >
-                                                <span className="layer-num-badge">{orderIndex + 1}</span>
-                                                {layerImages[i] ? <img src={layerImages[i]} alt="" /> : <span className="layer-thumb" />}
-                                                <span className="layer-name">
-                                                    <span className="layer-name-top">
-                                                        <input
-                                                            className="palette-swatch layer-dot layer-color"
-                                                            type="color"
-                                                            value={hex}
-                                                            title="색 변경"
-                                                            aria-label={`${hex} 색 변경`}
-                                                            onClick={(event) => event.stopPropagation()}
-                                                            onChange={(e) => handleColorChange(i, e)}
-                                                        />
-                                                        <span className="layer-hex">{hex}</span>
-                                                        {isModified && (
-                                                            <button
-                                                                type="button"
-                                                                className="layer-reset-btn"
-                                                                title="원래 색상으로 초기화"
-                                                                onClick={(e) => {
-                                                                    e.preventDefault();
-                                                                    e.stopPropagation();
-                                                                    resetSingleColor(i);
-                                                                }}
-                                                            >
-                                                                ↺
-                                                            </button>
-                                                        )}
-                                                    </span>
-                                                    <span className="layer-share">{share.toFixed(1)}% · {opacity}%</span>
-                                                </span>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={shown}
-                                                    aria-label={`${hex} 표시`}
-                                                    onClick={(event) => event.stopPropagation()}
-                                                    onChange={(e) => {
-                                                        const checked = e.target.checked;
-                                                        setColorVisible((prev) => {
-                                                            const next = clusters.map((_, index) => prev[index] !== false);
-                                                            next[i] = checked;
-                                                            colorVisibleRef.current = next;
-                                                            return next;
-                                                        });
-                                                    }}
-                                                />
-                                            </div>
-                                            {shown && (
-                                                <div className="layer-opacity-row">
-                                                    <input
-                                                        type="range"
-                                                        min="0"
-                                                        max="100"
-                                                        value={opacity}
-                                                        aria-label={`${hex} 불투명도`}
-                                                        onChange={(e) => {
-                                                            const val = Number(e.target.value);
-                                                            setColorOpacity((prev) => {
-                                                                const next = clusters.map((_, idx) => prev[idx] ?? 100);
-                                                                next[i] = val;
-                                                                colorOpacityRef.current = next;
-                                                                return next;
-                                                            });
-                                                        }}
-                                                    />
-                                                    <span>{opacity}%</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })}
                             <div className="layer-row-wrapper layer-row-bg-wrapper">
                                 <div
                                     className="layer-row layer-row-bg"
@@ -2073,21 +2108,11 @@ function App() {
                                     />
                                 </div>
                             </div>
+                            </details>
                                 </>
                             )}
                         </div>
-                    </details>
-                    <button
-                        type="button"
-                        className={`mode-tab study-entry${mode === "study" ? " mode-tab-active" : ""}`}
-                        aria-pressed={mode === "study"}
-                        onClick={() => switchMode("study")}
-                    >
-                        채색 공부
-                    </button>
-                    {mode !== "study" && (
-                        <p className="dock-aside-note">빛을 빼서 그림의 밑색을 봅니다.</p>
-                    )}
+                    </div>
                     {mode === "study" && (
                         <details
                             className="study-dock"
@@ -2095,8 +2120,8 @@ function App() {
                             onToggle={(event) => setStudyOpen(event.currentTarget.open)}
                         >
                             <summary className="dock-summary">
-                                <span className="layer-dock-title">채색 공부</span>
-                                <span className="dock-summary-hint">빛을 빼서 밑색을 봅니다</span>
+                                <span className="layer-dock-title">예시와 빛</span>
+                                <span className="dock-summary-hint">샘플을 고르고 밝은 곳을 집습니다</span>
                             </summary>
                             <StudyControls
                                 study={study}
