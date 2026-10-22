@@ -471,6 +471,7 @@ function App() {
     const [replayOpen, setReplayOpen] = useState(false);
     const [replayMenu, setReplayMenu] = useState(false);
     const [svgReplay, setSvgReplay] = useState(false);
+    const [svgDock, setSvgDock] = useState(null);
     const [studyOpen, setStudyOpen] = useState(true);
     const [activeSampleId, setActiveSampleId] = useState(null);
     const loadSerialRef = useRef(0);
@@ -1824,6 +1825,7 @@ function App() {
                                 image={imageRef.current}
                                 fileName={imageInfo?.name}
                                 onReplayActive={setSvgReplay}
+                                dock={centerTab === "svg" ? svgDock : null}
                             />
                         </div>
                     )}
@@ -1841,18 +1843,29 @@ function App() {
                     )}
                 </main>
 
-                <aside className="panel panel-right" aria-label={mode === "study" ? "채색 공부" : "뽑은 색"}>
+                <aside className="panel panel-right" aria-label={centerTab === "svg" ? "그리는 순서" : mode === "study" ? "채색 공부" : "뽑은 색"}>
                     <header className="region-head">
                         <h2>
                             <span className="region-index">3</span>
-                            {mode === "study" ? "채색 공부" : "뽑은 색"}
+                            {centerTab === "svg" ? "그리는 순서" : mode === "study" ? "채색 공부" : "뽑은 색"}
                         </h2>
                         <p>
-                            {mode === "study"
-                                ? "빛을 빼서 그림의 밑색을 봅니다."
-                                : "색 칸을 누르면 그 색만 보고, 체크는 보이기입니다."}
+                            {centerTab === "svg"
+                                ? "재생 막대를 움직이거나 칸을 누르면 그 장면까지 그려집니다."
+                                : mode === "study"
+                                    ? "빛을 빼서 그림의 밑색을 봅니다."
+                                    : "색 칸을 누르면 그 색만 보고, 체크는 보이기입니다."}
                         </p>
                     </header>
+                    {centerTab === "svg" ? (
+                        <div className="svg-dock" ref={setSvgDock}>
+                            {!imageData && (
+                                <div className="panel-placeholder panel-placeholder-dark">
+                                    그림을 열면 그리는 순서가 여기에 쌓입니다.
+                                </div>
+                            )}
+                        </div>
+                    ) : (
                     <div className="layer-list">
                         <div className="dock-body">
                             {!imageData && (
@@ -2135,7 +2148,8 @@ function App() {
                             )}
                         </div>
                     </div>
-                    {mode === "study" && (
+                    )}
+                    {mode === "study" && centerTab !== "svg" && (
                         <details
                             className="study-dock"
                             open={studyOpen}

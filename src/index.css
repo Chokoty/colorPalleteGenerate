@@ -1661,35 +1661,113 @@ input[type="checkbox"] {
     color: var(--ink);
 }
 
+.svg-dock {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.svg-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+    flex: 1;
+}
+
+.svg-playback {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding-bottom: 8px;
+    background: var(--paper);
+    border-bottom: 1px solid var(--ink);
+}
+
+.svg-playback .mode-tab {
+    flex: 0 0 auto;
+}
+
+.svg-scrub {
+    flex: 1;
+    min-width: 0;
+}
+
+.svg-scrub input {
+    width: 100%;
+}
+
+.svg-scrub-readout {
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+}
+
+.svg-speed {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+}
+
 .svg-layer-list {
     list-style: none;
     margin: 0;
     padding: 0;
     overflow: auto;
-    max-height: 240px;
-    border: 1px solid var(--ink);
+    flex: 1;
+    min-height: 0;
+    border-top: 1px solid var(--ink);
     background: var(--paper);
 }
 
 .svg-layer-list li {
+    margin: 0;
+    padding: 0;
+}
+
+.svg-layer-list button {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 8px;
+    width: 100%;
+    padding: 8px 2px;
+    border: 0;
     border-bottom: 1px solid var(--ink-faint);
-    opacity: 0.45;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    opacity: 0.4;
 }
 
-.svg-layer-list li:last-child {
+.svg-layer-list li:last-child button {
     border-bottom: none;
 }
 
-.svg-layer-list li[data-on="true"] {
+.svg-layer-list button[data-on="true"] {
     opacity: 1;
 }
 
-.svg-layer-list li[data-current="true"] {
-    background: rgba(17, 17, 17, 0.06);
+.svg-layer-list button[data-current="true"] {
+    background: var(--ink);
+    color: var(--paper);
+    opacity: 1;
+}
+
+.svg-layer-list button[data-current="true"] .svg-layer-index,
+.svg-layer-list button[data-current="true"] .svg-layer-copy em {
+    color: inherit;
+}
+
+.svg-layer-list button[data-current="true"] i {
+    border-color: var(--paper);
 }
 
 .svg-layer-index {
@@ -1750,12 +1828,19 @@ input[type="checkbox"] {
     color: var(--replay-text);
 }
 
-.replay-panel .svg-layer-list li {
+.replay-panel .svg-layer-list button {
     border-bottom-color: var(--replay-line);
+    color: var(--replay-text);
 }
 
-.replay-panel .svg-layer-list li[data-current="true"] {
+.replay-panel .svg-layer-list button[data-current="true"] {
     background: rgba(255, 255, 255, 0.08);
+    color: var(--replay-text);
+}
+
+.replay-panel .svg-playback {
+    background: transparent;
+    border-bottom-color: var(--replay-line);
 }
 
 .replay-panel .svg-layer-list i {

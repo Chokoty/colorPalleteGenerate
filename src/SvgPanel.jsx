@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { constructionOpacity, drawnToSvg, measureError, TRACE_MAX_SIDE } from "./drawnTrace.js";
 import { downscaleRgba } from "./useColorStudy";
 import { ReplayChrome } from "./ui/ReplayChrome";
@@ -10,6 +11,94 @@ function formatBytes(bytes) {
     const kb = bytes / 1024;
     if (kb < 1024) return `${kb.toFixed(kb < 10 ? 1 : 0)}KB`;
     return `${(kb / 1024).toFixed(1)}MB`;
+}
+
+function DrawingTimeline({ picture, shown, playing, speed, status, progressTitle, onPlay, onSeek, onSpeed }) {
+    const layers = picture?.layers || [];
+    const count = layers.length;
+    const listRef = useRef(null);
+    const playLabel = playing ? "일시정지" : shown > 0 && shown < count ? "이어 그리기" : "그리기";
+
+    useEffect(() => {
+        const list = listRef.current;
+        const current = list?.querySelector('[data-current="true"]');
+        if (!list || !current) return;
+        const listRect = list.getBoundingClientRect();
+        const itemRect = current.getBoundingClientRect();
+        if (itemRect.top < listRect.top) list.scrollTop -= listRect.top - itemRect.top;
+        else if (itemRect.bottom > listRect.bottom) list.scrollTop += itemRect.bottom - listRect.bottom;
+    }, [shown]);
+
+    return (
+        <div className="svg-timeline">
+            <div className="svg-playback" role="group" aria-label="그리기 재생">
+                <button type="button" className="mode-tab" onClick={onPlay} disabled={!count} aria-pressed={playing}>
+                    {playLabel}
+                </button>
+                <label className="svg-scrub">
+                    <input
+                        type="range"
+                        min="0"
+                        max={Math.max(count, 1)}
+                        step="1"
+                        value={Math.min(shown, count)}
+                        disabled={!count}
+                        aria-label="장면"
+                        aria-valuemin={0}
+                        aria-valuemax={count}
+                        aria-valuenow={shown}
+                        aria-valuetext={count ? `${shown} / ${count}` : "준비 중"}
+                        onChange={(event) => onSeek(Number(event.target.value))}
+                    />
+                </label>
+                <span className="svg-scrub-readout">{count ? `${shown}/${count}` : "—"}</span>
+            </div>
+            <label className="svg-speed">
+                속도 {speed.toFixed(1)}×
+                <input
+                    type="range"
+                    min="0.5"
+                    max="3"
+                    step="0.1"
+                    value={speed}
+                    aria-label="재생 속도"
+                    onChange={(event) => onSpeed(Number(event.target.value))}
+                />
+            </label>
+            {!count && (
+                <p className="svg-note">
+                    {status === "tracing"
+                        ? progressTitle
+                            ? `벡터로 만드는 중 · ${progressTitle}`
+                            : "벡터로 만드는 중"
+                        : "색이 준비되면 그리는 순서가 여기에 쌓입니다."}
+                </p>
+            )}
+            <ol ref={listRef} className="svg-layer-list" aria-label="SVG 레이어">
+                {layers.map((layer, index) => (
+                    <li key={layer.id}>
+                        <button
+                            type="button"
+                            data-on={index < shown ? "true" : "false"}
+                            data-current={index === shown - 1 ? "true" : "false"}
+                            aria-current={index === shown - 1 ? "step" : undefined}
+                            onClick={() => onSeek(index + 1)}
+                        >
+                            <span className="svg-layer-index">{index + 1}</span>
+                            <i style={{ background: layer.hex }} />
+                            <span className="svg-layer-copy">
+                                <strong>{layer.name}</strong>
+                                <em>
+                                    {layer.kind === "stroke" ? "획" : "면"} · {layer.paths.length}
+                                    {layer.mae != null ? ` · MAE ${layer.mae.toFixed(2)} · ${layer.psnr.toFixed(1)} dB` : ""}
+                                </em>
+                            </span>
+                        </button>
+                    </li>
+                ))}
+            </ol>
+        </div>
+    );
 }
 
 function downloadText(filename, text) {
@@ -71,6 +160,7 @@ export default function SvgPanel({
     image,
     fileName,
     onReplayActive,
+    dock,
 }) {
     const [detail, setDetail] = useState(64);
     const [colorCount, setColorCount] = useState(8);
@@ -256,7 +346,10 @@ export default function SvgPanel({
         downloadText(animated ? `${stem}-animated.svg` : `${stem}.svg`, doc.svg);
     };
 
-    const playLabel = playing ? "일시정지" : shown > 0 && shown < layerCount ? "이어 그리기" : "그리기";
+    const seek = (value) => {
+        setPlaying(false);
+        setShown(Math.max(0, Math.min(layerCount, value)));
+    };
 
     const onToggleMenu = () => {
         if (!picture?.layers.length) return;
@@ -353,23 +446,6 @@ export default function SvgPanel({
             <p className="svg-note">
                 원본 픽셀만 곡선으로 따서 큰 면부터 작은 면 순으로 쌓습니다. 앞의 두 선은 마지막에 사라집니다.
             </p>
-            <div className="svg-transport">
-                <button type="button" className="mode-tab" onClick={togglePlay} disabled={!layerCount} aria-pressed={playing}>
-                    {playLabel}
-                </button>
-                <label>
-                    속도 {speed.toFixed(1)}×
-                    <input
-                        type="range"
-                        min="0.5"
-                        max="3"
-                        step="0.1"
-                        value={speed}
-                        aria-label="재생 속도"
-                        onChange={(event) => setSpeed(Number(event.target.value))}
-                    />
-                </label>
-            </div>
             <div className="svg-actions">
                 <button type="button" className="mode-tab" onClick={() => save(false)} disabled={!layerCount}>
                     SVG 저장
@@ -388,27 +464,34 @@ export default function SvgPanel({
                     </span>
                 ) : null}
             </div>
-            <div className="svg-layer-heading">그리는 순서</div>
-            <ol className="svg-layer-list" aria-label="SVG 레이어">
-                {(picture?.layers || []).map((layer, index) => (
-                    <li
-                        key={layer.id}
-                        data-on={index < shown ? "true" : "false"}
-                        data-current={playing && index === shown - 1 ? "true" : "false"}
-                    >
-                        <span className="svg-layer-index">{index + 1}</span>
-                        <i style={{ background: layer.hex }} />
-                        <span className="svg-layer-copy">
-                            <strong>{layer.name}</strong>
-                            <em>
-                                {layer.kind === "stroke" ? "획" : "면"} · {layer.paths.length}
-                                {layer.mae != null ? ` · MAE ${layer.mae.toFixed(2)} · ${layer.psnr.toFixed(1)} dB` : ""}
-                            </em>
-                        </span>
-                    </li>
-                ))}
-            </ol>
+            {replayOpen && (
+                <DrawingTimeline
+                    picture={picture}
+                    shown={shown}
+                    playing={playing}
+                    speed={speed}
+                    status={status}
+                    progressTitle={progressTitle}
+                    onPlay={togglePlay}
+                    onSeek={seek}
+                    onSpeed={setSpeed}
+                />
+            )}
         </>
+    );
+
+    const timeline = (
+        <DrawingTimeline
+            picture={picture}
+            shown={shown}
+            playing={playing}
+            speed={speed}
+            status={status}
+            progressTitle={progressTitle}
+            onPlay={togglePlay}
+            onSeek={seek}
+            onSpeed={setSpeed}
+        />
     );
 
     return (
@@ -436,6 +519,7 @@ export default function SvgPanel({
                     {!replayOpen && <div className="device-controls">{controls}</div>}
                 </div>
             </ReplayChrome>
+            {!replayOpen && dock ? createPortal(timeline, dock) : null}
         </section>
     );
 }
