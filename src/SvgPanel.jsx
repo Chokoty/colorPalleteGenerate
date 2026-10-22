@@ -68,10 +68,8 @@ function traceWithWorker(job, onProgress) {
 export default function SvgPanel({
     active,
     uploadId,
-    mode,
     image,
     fileName,
-    onView,
     onReplayActive,
 }) {
     const [detail, setDetail] = useState(64);
@@ -260,12 +258,6 @@ export default function SvgPanel({
 
     const playLabel = playing ? "일시정지" : shown > 0 && shown < layerCount ? "이어 그리기" : "그리기";
 
-    const leave = (id) => {
-        setReplayOpen(false);
-        setMenuOpen(false);
-        onView?.(id);
-    };
-
     const onToggleMenu = () => {
         if (!picture?.layers.length) return;
         if (!replayOpen) {
@@ -334,20 +326,6 @@ export default function SvgPanel({
 
     const controls = (
         <>
-            <div className="button-row" role="tablist" aria-label="가운데 보기">
-                {mode === "study" ? (
-                    <button type="button" role="tab" className="mode-tab" onClick={() => leave("recolor")}>
-                        채색
-                    </button>
-                ) : (
-                    <button type="button" role="tab" className="mode-tab" onClick={() => leave("recolor")}>
-                        재색상
-                    </button>
-                )}
-                <button type="button" role="tab" className="mode-tab mode-tab-active" aria-selected="true">
-                    SVG
-                </button>
-            </div>
             <div className="svg-controls">
                 <label>
                     디테일 {detail}
@@ -447,12 +425,6 @@ export default function SvgPanel({
                 panel={replayOpen && menuOpen ? controls : null}
             >
                 <div className="device svg-device">
-                    <div className="device-kicker">
-                        <span>
-                            Draw <strong>SVG</strong>
-                        </span>
-                        {picture?.ms != null && <span className="device-time">{picture.ms}MS</span>}
-                    </div>
                     <div className="device-stage">
                         <div className="device-frame svg-stage">
                             {drawing}
