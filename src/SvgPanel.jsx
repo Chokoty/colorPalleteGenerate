@@ -21,8 +21,13 @@ function DrawingTimeline({ picture, shown, playing, speed, status, progressTitle
 
     useEffect(() => {
         const list = listRef.current;
-        const current = list?.querySelector('[data-current="true"]');
-        if (!list || !current) return;
+        if (!list) return;
+        if (shown <= 1) {
+            list.scrollTop = 0;
+            return;
+        }
+        const current = list.querySelector('[data-current="true"]');
+        if (!current) return;
         const listRect = list.getBoundingClientRect();
         const itemRect = current.getBoundingClientRect();
         if (itemRect.top < listRect.top) list.scrollTop -= listRect.top - itemRect.top;
@@ -32,7 +37,7 @@ function DrawingTimeline({ picture, shown, playing, speed, status, progressTitle
     return (
         <div className="svg-timeline">
             <div className="svg-playback" role="group" aria-label="그리기 재생">
-                <button type="button" className="mode-tab" onClick={onPlay} disabled={!count} aria-pressed={playing}>
+                <button type="button" className="mode-tab svg-play" onClick={onPlay} disabled={!count} aria-pressed={playing}>
                     {playLabel}
                 </button>
                 <label className="svg-scrub">
@@ -57,11 +62,15 @@ function DrawingTimeline({ picture, shown, playing, speed, status, progressTitle
                 속도 {speed.toFixed(1)}×
                 <input
                     type="range"
-                    min="0.5"
-                    max="3"
+                    min="0.1"
+                    max="2"
                     step="0.1"
                     value={speed}
                     aria-label="재생 속도"
+                    aria-valuemin={0.1}
+                    aria-valuemax={2}
+                    aria-valuenow={speed}
+                    aria-valuetext={`${speed.toFixed(1)}배`}
                     onChange={(event) => onSpeed(Number(event.target.value))}
                 />
             </label>

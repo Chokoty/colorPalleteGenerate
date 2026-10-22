@@ -680,7 +680,7 @@ export async function buildDrawnTrace({
 
 export function drawnToSvg(trace, options = {}) {
     const animated = Boolean(options.animated);
-    const speed = Math.max(0.25, options.speed || 1);
+    const speed = Math.min(2, Math.max(0.1, options.speed || 1));
     const layers = trace.layers || [];
     const parts = [
         `<?xml version="1.0" encoding="UTF-8"?>`,

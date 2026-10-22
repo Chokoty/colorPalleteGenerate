@@ -1688,8 +1688,13 @@ input[type="checkbox"] {
     border-bottom: 1px solid var(--ink);
 }
 
-.svg-playback .mode-tab {
-    flex: 0 0 auto;
+.svg-playback .svg-play {
+    flex: 0 0 104px;
+    width: 104px;
+    box-sizing: border-box;
+    white-space: nowrap;
+    text-align: center;
+    overflow: hidden;
 }
 
 .svg-scrub {
@@ -1702,10 +1707,12 @@ input[type="checkbox"] {
 }
 
 .svg-scrub-readout {
-    flex: 0 0 auto;
+    flex: 0 0 3.2em;
+    width: 3.2em;
     font-size: 12px;
     font-variant-numeric: tabular-nums;
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
+    text-align: right;
 }
 
 .svg-speed {
