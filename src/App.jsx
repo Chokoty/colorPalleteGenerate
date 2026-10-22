@@ -410,7 +410,7 @@ function App() {
     const [inkNote, setInkNote] = useState("");
     const [dragActive, setDragActive] = useState(false);
     const [shadingVisible, setShadingVisible] = useState(false);
-    const [lineArtVisible, setLineArtVisible] = useState(true);
+    const [lineArtVisible, setLineArtVisible] = useState(false);
     const [colorVisible, setColorVisible] = useState([]);
     const [originalClusters, setOriginalClusters] = useState([]);
     const [bgColor, setBgColor] = useState("#ffffff");
@@ -451,7 +451,7 @@ function App() {
     const inkCacheRef = useRef(null);
     const shadingVisibleRef = useRef(false);
     const showLinesRef = useRef(false);
-    const lineArtVisibleRef = useRef(true);
+    const lineArtVisibleRef = useRef(false);
     const colorVisibleRef = useRef([]);
     const bgColorRef = useRef("#ffffff");
     const bgVisibleRef = useRef(true);
@@ -698,13 +698,13 @@ function App() {
                     imageRef.current = stored;
                     previewRef.current = stored;
                     inkCacheRef.current = null;
-                    lineArtVisibleRef.current = true;
+                    lineArtVisibleRef.current = false;
                     soloRef.current = null;
                     colorVisibleRef.current = [];
                     pickedPointsRef.current = [];
                     pickSerialRef.current = 0;
                     setPickedPoints([]);
-                    setLineArtVisible(true);
+                    setLineArtVisible(false);
                     setColorVisible([]);
                     setLineThumb(null);
                     setLineArtThumb(null);
@@ -1141,11 +1141,11 @@ function App() {
 
             const cluster = ids[p];
             const center = centers[cluster];
-            const colorOn = soloNow
-                ? soloNow.kind === "color"
-                    ? soloNow.index === cluster
-                    : soloNow.kind === "shade" && visibleColors[cluster] !== false
-                : visibleColors[cluster] !== false;
+            const colorOn = soloNow?.kind === "color"
+                ? soloNow.index === cluster
+                : soloNow?.kind === "bg"
+                    ? false
+                    : visibleColors[cluster] !== false;
             if (center && colorOn) {
                 const layerOp = (opacities[cluster] ?? 100) / 100;
                 if (layerOp <= 0) continue;
@@ -1195,40 +1195,52 @@ function App() {
         const drawLines = soloNow ? soloNow.kind === "lines" : showLinesRef.current;
         if (drawLines) {
             const edges = gradientEdges(stored.data, width, height);
-            const edgeAlpha = 230 / 255;
             for (let i = 0; i < edges.length; i++) {
                 if (!edges[i]) continue;
                 const offset = i * 4;
-                const destR = frame.data[offset];
-                const destG = frame.data[offset + 1];
-                const destB = frame.data[offset + 2];
                 const destA = frame.data[offset + 3] / 255;
                 if (bgActive || destA > 0) {
-                    frame.data[offset] = Math.round(25 * edgeAlpha + destR * (1 - edgeAlpha));
-                    frame.data[offset + 1] = Math.round(25 * edgeAlpha + destG * (1 - edgeAlpha));
-                    frame.data[offset + 2] = Math.round(25 * edgeAlpha + destB * (1 - edgeAlpha));
-                    frame.data[offset + 3] = bgActive ? 255 : Math.round((edgeAlpha + destA * (1 - edgeAlpha)) * 255);
+                    frame.data[offset] = Math.round(frame.data[offset] * 0.35);
+                    frame.data[offset + 1] = Math.round(frame.data[offset + 1] * 0.35);
+                    frame.data[offset + 2] = Math.round(frame.data[offset + 2] * 0.35);
                 } else {
                     frame.data[offset] = 25;
                     frame.data[offset + 1] = 25;
                     frame.data[offset + 2] = 25;
-                    frame.data[offset + 3] = Math.round(edgeAlpha * 255);
+                    frame.data[offset + 3] = 230;
                 }
             }
         }
-
-        ctx.putImageData(frame, 0, 0);
 
         const art = inkCacheRef.current;
         const drawInk = soloNow ? soloNow.kind === "ink" : lineArtVisibleRef.current;
         if (drawInk && art && art.source === stored.data) {
             const inkOp = (lineArtOpacityRef.current ?? 100) / 100;
+            const ink = art.art.rgba;
             if (inkOp > 0) {
-                ctx.globalAlpha = inkOp;
-                ctx.drawImage(inkPlate(art.art), 0, 0, width, height);
-                ctx.globalAlpha = 1.0;
+                const pixels = width * height;
+                for (let i = 0; i < pixels; i++) {
+                    const value = ink[i * 4];
+                    if (value > 226) continue;
+                    const offset = i * 4;
+                    const darkness = ((255 - value) / 255) * inkOp;
+                    const destA = frame.data[offset + 3] / 255;
+                    if (bgActive || destA > 0) {
+                        const keep = 1 - darkness;
+                        frame.data[offset] = Math.round(frame.data[offset] * keep);
+                        frame.data[offset + 1] = Math.round(frame.data[offset + 1] * keep);
+                        frame.data[offset + 2] = Math.round(frame.data[offset + 2] * keep);
+                    } else {
+                        frame.data[offset] = Math.round(value * (1 - darkness));
+                        frame.data[offset + 1] = frame.data[offset];
+                        frame.data[offset + 2] = frame.data[offset];
+                        frame.data[offset + 3] = Math.round(darkness * 255);
+                    }
+                }
             }
         }
+
+        ctx.putImageData(frame, 0, 0);
         view.width = width;
         view.height = height;
         const viewCtx = view.getContext("2d");
@@ -1252,8 +1264,6 @@ function App() {
             .then((art) => {
                 if (request !== inkRequestRef.current) return;
                 inkCacheRef.current = { source: preview.data, art };
-                lineArtVisibleRef.current = true;
-                setLineArtVisible(true);
                 setLineArtThumb(lineArtThumbnail(art));
                 setInkNote("");
             })
@@ -1966,18 +1976,22 @@ function App() {
                                 })}
                             <details className="overlay-tools">
                                 <summary>선과 음영</summary>
-                                <p className="region-sub">그림 위에 겹치는 선과 배경입니다. 뽑은 색은 위 목록입니다.</p>
+                                <p className="region-sub">색은 그대로 두고 선이나 명암만 위에 겹칩니다.</p>
                             <div className="layer-row-wrapper">
                                 <div
                                     className="layer-row"
                                     data-hidden={showLines ? "false" : "true"}
                                     data-solo={solo?.kind === "lines" ? "true" : "false"}
-                                    onClick={() => toggleSolo({ kind: "lines" })}
+                                    onClick={() => {
+                                        if (solo?.kind === "lines") toggleSolo({ kind: "lines" });
+                                        showLinesRef.current = !showLines;
+                                        setShowLines((on) => !on);
+                                    }}
                                 >
                                     {lineThumb ? <img src={lineThumb} alt="" /> : <span className="layer-thumb" />}
                                     <span className="layer-name">
                                         <span className="layer-name-top">선 필터</span>
-                                        <span className="layer-share">밝기 경계</span>
+                                        <span className="layer-share">밝기 차이로 바로 그린 경계</span>
                                     </span>
                                     <input
                                         type="checkbox"
@@ -1996,12 +2010,16 @@ function App() {
                                     className="layer-row"
                                     data-hidden={lineArtVisible ? "false" : "true"}
                                     data-solo={solo?.kind === "ink" ? "true" : "false"}
-                                    onClick={() => toggleSolo({ kind: "ink" })}
+                                    onClick={() => {
+                                        if (solo?.kind === "ink") toggleSolo({ kind: "ink" });
+                                        lineArtVisibleRef.current = !lineArtVisible;
+                                        setLineArtVisible((on) => !on);
+                                    }}
                                 >
                                     {lineArtThumb ? <img src={lineArtThumb} alt="" /> : <span className="layer-thumb" />}
                                     <span className="layer-name">
                                         <span className="layer-name-top">선화</span>
-                                        <span className="layer-share">{inkNote || `불투명도 ${lineArtOpacity}%`}</span>
+                                        <span className="layer-share">{inkNote || "따 온 먹선. 색 위에 겹칩니다"}</span>
                                     </span>
                                     <input
                                         type="checkbox"
@@ -2037,12 +2055,16 @@ function App() {
                                     className="layer-row"
                                     data-hidden={shadingVisible ? "false" : "true"}
                                     data-solo={solo?.kind === "shade" ? "true" : "false"}
-                                    onClick={() => toggleSolo({ kind: "shade" })}
+                                    onClick={() => {
+                                        if (solo?.kind === "shade") toggleSolo({ kind: "shade" });
+                                        shadingVisibleRef.current = !shadingVisible;
+                                        setShadingVisible((on) => !on);
+                                    }}
                                 >
                                     <span className="layer-thumb" />
                                     <span className="layer-name">
                                         <span className="layer-name-top">음영</span>
-                                        <span className="layer-share">원본 명암 겹침 · {shadingOpacity}%</span>
+                                        <span className="layer-share">평평한 색 위에 원본 명암 · {shadingOpacity}%</span>
                                     </span>
                                         <input
                                             type="checkbox"
