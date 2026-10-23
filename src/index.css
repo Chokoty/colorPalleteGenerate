@@ -1264,6 +1264,29 @@ input[type="checkbox"] {
     margin-bottom: 0;
 }
 
+.shadow-tint-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0;
+    padding: 2px 8px 6px 28px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.shadow-tint-row span {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    line-height: 1.35;
+}
+
+.shadow-tint-row em {
+    font-style: normal;
+    font-size: 11px;
+    color: var(--ink-soft);
+}
+
 .layer-opacity-row {
     display: flex;
     align-items: center;

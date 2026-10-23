@@ -18,6 +18,7 @@ import SvgPanel from "./SvgPanel";
 import { useColorStudy } from "./useColorStudy";
 import { ReplayChrome } from "./ui/ReplayChrome";
 import { addPick, centersWithPicks, pickAt, removePick, restorePicks, rgb01ToHex } from "./pickedColors";
+import { tintedShadowPixel } from "./shadowTint";
 
 // Main-branch extraction: the user picks k, and centers are k-means means
 // of sampled RGB+XY points. Recolor fills each pixel with its center.
@@ -330,13 +331,12 @@ function flatChannels(center) {
     ];
 }
 
-function paintedChannels(data, index, center, shaded) {
+function paintedChannels(data, index, center, shaded, shadowTint) {
     if (!shaded) return flatChannels(center);
     const offset = index * 4;
-    const color = recolorPixel(
-        [data[offset], data[offset + 1], data[offset + 2]],
-        [center.rgb[0] * 255, center.rgb[1] * 255, center.rgb[2] * 255]
-    );
+    const pixel = [data[offset], data[offset + 1], data[offset + 2]];
+    const swatch = [center.rgb[0] * 255, center.rgb[1] * 255, center.rgb[2] * 255];
+    const color = shadowTint ? tintedShadowPixel(pixel, swatch) : recolorPixel(pixel, swatch);
     return [Math.floor(color[0]), Math.floor(color[1]), Math.floor(color[2])];
 }
 
@@ -418,6 +418,7 @@ function App() {
     const [colorOpacity, setColorOpacity] = useState([]);
     const [lineArtOpacity, setLineArtOpacity] = useState(100);
     const [shadingOpacity, setShadingOpacity] = useState(100);
+    const [shadowTint, setShadowTint] = useState(true);
     const [lineThumb, setLineThumb] = useState(null);
     const [lineArtThumb, setLineArtThumb] = useState(null);
     const [solo, setSolo] = useState(null);
@@ -458,6 +459,7 @@ function App() {
     const colorOpacityRef = useRef([]);
     const lineArtOpacityRef = useRef(100);
     const shadingOpacityRef = useRef(100);
+    const shadowTintRef = useRef(true);
     const soloRef = useRef(null);
     const clustersRef = useRef([]);
     const pickedPointsRef = useRef([]);
@@ -1094,6 +1096,7 @@ function App() {
     colorOpacityRef.current = colorOpacity;
     lineArtOpacityRef.current = lineArtOpacity;
     shadingOpacityRef.current = shadingOpacity;
+    shadowTintRef.current = shadowTint;
     soloRef.current = solo;
 
     const paintComposite = () => {
@@ -1152,7 +1155,7 @@ function App() {
                 if (layerOp <= 0) continue;
 
                 const shadeHere = soloNow?.kind === "color" ? false : soloNow?.kind === "shade" ? true : isShadingOn;
-                const color = paintedChannels(stored.data, p, center, shadeHere);
+                const color = paintedChannels(stored.data, p, center, shadeHere, shadowTintRef.current);
                 let finalR = color[0];
                 let finalG = color[1];
                 let finalB = color[2];
@@ -1314,6 +1317,7 @@ function App() {
         colorOpacity,
         lineArtOpacity,
         shadingOpacity,
+        shadowTint,
     ]);
 
     useEffect(() => {
@@ -2077,7 +2081,11 @@ function App() {
                                     <span className="layer-thumb" />
                                     <span className="layer-name">
                                         <span className="layer-name-top">음영</span>
-                                        <span className="layer-share">평평한 색 위에 원본 명암 · {shadingOpacity}%</span>
+                                        <span className="layer-share">
+                                            {shadowTint
+                                                ? `어두운 곳은 색을 살짝 틀어 칠함 · ${shadingOpacity}%`
+                                                : `평평한 색 위에 원본 명암 · ${shadingOpacity}%`}
+                                        </span>
                                     </span>
                                         <input
                                             type="checkbox"
@@ -2091,21 +2099,38 @@ function App() {
                                         />
                                     </div>
                                 {shadingVisible && (
-                                    <div className="layer-opacity-row">
-                                        <input
-                                            type="range"
-                                            min="0"
-                                            max="100"
-                                            value={shadingOpacity}
-                                            aria-label="음영 불투명도"
-                                            onChange={(e) => {
-                                                const val = Number(e.target.value);
-                                                shadingOpacityRef.current = val;
-                                                setShadingOpacity(val);
-                                            }}
-                                        />
-                                        <span>{shadingOpacity}%</span>
-                                    </div>
+                                    <>
+                                        <label className="shadow-tint-row">
+                                            <input
+                                                type="checkbox"
+                                                checked={shadowTint}
+                                                aria-label="그림자 색 틀기"
+                                                onChange={(event) => {
+                                                    shadowTintRef.current = event.target.checked;
+                                                    setShadowTint(event.target.checked);
+                                                }}
+                                            />
+                                            <span>
+                                                색 틀기
+                                                <em>어두운 곳을 차가운 쪽으로 조금 돌리고 채도를 낮춥니다.</em>
+                                            </span>
+                                        </label>
+                                        <div className="layer-opacity-row">
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="100"
+                                                value={shadingOpacity}
+                                                aria-label="음영 불투명도"
+                                                onChange={(e) => {
+                                                    const val = Number(e.target.value);
+                                                    shadingOpacityRef.current = val;
+                                                    setShadingOpacity(val);
+                                                }}
+                                            />
+                                            <span>{shadingOpacity}%</span>
+                                        </div>
+                                    </>
                                 )}
                             </div>
                             <div className="layer-row-wrapper layer-row-bg-wrapper">
