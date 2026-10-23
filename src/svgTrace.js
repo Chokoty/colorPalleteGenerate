@@ -873,7 +873,7 @@ function layerGroup(layer, extra = "") {
 
 export function layersToSvg(layers, width, height, options = {}) {
     const animated = Boolean(options.animated);
-    const speed = Math.max(0.25, options.speed || 1);
+    const speed = Math.min(2, Math.max(0.1, options.speed || 1));
     const parts = [
         `<?xml version="1.0" encoding="UTF-8"?>`,
         `<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:i="http://ns.adobe.com/AdobeIllustrator/10.0/" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">`,

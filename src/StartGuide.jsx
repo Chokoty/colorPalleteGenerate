@@ -5,7 +5,7 @@ export function StartGuide() {
             <svg
                 viewBox="0 0 560 156"
                 role="img"
-                aria-label="왼쪽에서 그림을 올리고, 가운데에서 나뉜 색을 보고, 오른쪽 레이어 제목을 눌러 접습니다."
+                aria-label="1 원본에 그림을 올리고, 2 다시 칠한 그림을 보고, 3 뽑은 색을 고칩니다."
             >
                 <g fill="none" stroke="currentColor" strokeWidth="1.5">
                     <rect x="8" y="8" width="168" height="112" />
@@ -27,18 +27,18 @@ export function StartGuide() {
                     <rect x="400" y="86" width="136" height="16" />
                 </g>
                 <g className="start-guide-labels" fill="currentColor" fontSize="12">
-                    <text x="16" y="142">1 올리기</text>
-                    <text x="204" y="142">2 색이 나뉨</text>
-                    <text x="392" y="142">3 레이어</text>
+                    <text x="16" y="142">1 원본</text>
+                    <text x="204" y="142">2 다시 칠함</text>
+                    <text x="392" y="142">3 뽑은 색</text>
                 </g>
             </svg>
             <ol className="start-guide-steps">
-                <li>왼쪽 칸에 그림을 놓습니다.</li>
-                <li>가운데에 대표 색과 다시 칠한 그림이 나옵니다.</li>
-                <li>오른쪽 제목을 누르면 색 칸이 접힙니다.</li>
+                <li>1 원본에 그림을 놓습니다.</li>
+                <li>2에 그 색으로 다시 칠한 그림이 나옵니다.</li>
+                <li>3에서 뽑은 색을 고치고 켜고 끕니다.</li>
             </ol>
             <p className="start-guide-note">
-                채색 공부는 오른쪽 레이어 아래에 있습니다. 예시 그림을 연 뒤 밝은 곳을 집으면 빛을 뺀 밑색이 보입니다.
+                채색 공부는 위쪽 탭에 있습니다. 예시 그림을 연 뒤 밝은 곳을 집으면 빛을 뺀 밑색이 보입니다.
             </p>
         </figure>
     );

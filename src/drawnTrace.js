@@ -35,14 +35,21 @@ export function traceTuning(detail) {
 // A larger shift merges them. layerDifference is how far apart a new layer must be.
 export function fidelityTuning(detail, colorCount) {
     const t = clampUnit((Number(detail) || 0) / 100);
-    const colors = Math.max(3, Math.min(8, Math.round(Number(colorCount) || 8)));
-    const span = (colors - 3) / 5;
+    const colors = Math.max(3, Math.min(32, Math.round(Number(colorCount) || 8)));
+    // 3..8 is the old merge scale. Above 8 the shift stays at 0, which keeps
+    // the photo's colors, and the layer gap keeps shrinking so similar paints
+    // are no longer forced into one of eight swatches.
+    const span = Math.min(1, (colors - 3) / 5);
+    const colorPrecision = span >= 0.8 ? 0 : span >= 0.4 ? 1 : 2;
+    const merged = Math.round(64 - span * 48);
+    const extra = Math.max(0, colors - 8) / 24;
+    const layerDifference = colors <= 8 ? merged : Math.max(2, Math.round(16 - extra * 14));
     return {
         filterSpeckle: Math.max(2, Math.round(10 - t * 9)),
         cornerDeg: 60,
         pathPrecision: 3,
-        colorPrecision: span >= 0.8 ? 0 : span >= 0.4 ? 1 : 2,
-        layerDifference: Math.round(64 - span * 48),
+        colorPrecision,
+        layerDifference,
     };
 }
 
@@ -680,7 +687,7 @@ export async function buildDrawnTrace({
 
 export function drawnToSvg(trace, options = {}) {
     const animated = Boolean(options.animated);
-    const speed = Math.max(0.25, options.speed || 1);
+    const speed = Math.min(2, Math.max(0.1, options.speed || 1));
     const layers = trace.layers || [];
     const parts = [
         `<?xml version="1.0" encoding="UTF-8"?>`,

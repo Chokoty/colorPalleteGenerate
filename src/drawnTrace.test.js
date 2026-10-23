@@ -112,6 +112,10 @@ test("eight colors trace the photo with no color shift", () => {
     assert.equal(close.filterSpeckle, 4);
     assert.ok(coarse.colorPrecision > close.colorPrecision);
     assert.ok(coarse.layerDifference > close.layerDifference);
+    const open = fidelityTuning(64, 32);
+    assert.equal(open.colorPrecision, 0);
+    assert.equal(open.layerDifference, 2);
+    assert.ok(open.layerDifference < close.layerDifference);
     assert.equal(vtracerConfig({ ...close, binary: false }).colorPrecision, 0);
 });
 
