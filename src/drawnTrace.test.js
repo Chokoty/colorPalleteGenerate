@@ -9,11 +9,14 @@ import {
     drawnToSvg,
     elementCap,
     fidelityTuning,
+    flattenTraceColors,
     measureError,
     mergeSmallRegions,
     parseSvgPaths,
     slicLabels,
     smoothEdges,
+    smoothTracePath,
+    traceCleanup,
     traceTuning,
     vtracerConfig,
 } from "./drawnTrace.js";
@@ -102,6 +105,70 @@ test("construction lines are gone once every batch is drawn", () => {
     assert.equal(constructionOpacity(1, 10), 0);
     assert.ok(constructionOpacity(0, 1) > 0.8);
     assert.equal(constructionOpacity(3, 4), 1);
+});
+
+test("fewer colors merge farther and low detail smooths more", () => {
+    const coarse = traceCleanup(64, 3);
+    const mid = traceCleanup(64, 8);
+    const fine = traceCleanup(64, 32);
+    const loose = traceCleanup(0, 8);
+    const tight = traceCleanup(100, 8);
+    assert.ok(coarse.mergeDist > mid.mergeDist);
+    assert.ok(mid.mergeDist > fine.mergeDist);
+    assert.ok(coarse.epsilon > fine.epsilon);
+    assert.ok(loose.epsilon > tight.epsilon);
+    assert.ok(mid.minArea >= 8);
+});
+
+test("flat cleanup swallows a speck and keeps a distant patch", () => {
+    const width = 28;
+    const height = 28;
+    const data = solid(width, height, () => [210, 48, 48]);
+    for (let y = 10; y < 18; y++) {
+        for (let x = 10; x < 18; x++) {
+            const o = (y * width + x) * 4;
+            data[o] = 12;
+            data[o + 1] = 12;
+            data[o + 2] = 16;
+        }
+    }
+    data[4] = 30;
+    data[5] = 210;
+    data[6] = 40;
+    const flat = flattenTraceColors(data, width, height, 64, 8);
+    const colors = new Set();
+    for (let i = 0; i < flat.data.length; i += 4) {
+        if (flat.data[i + 3] < 128) continue;
+        colors.add(`${flat.data[i]},${flat.data[i + 1]},${flat.data[i + 2]}`);
+    }
+    assert.equal(colors.size, 2);
+    const center = (14 * width + 14) * 4;
+    assert.ok(flat.data[center] < 40);
+    assert.ok(flat.data[4] > 160);
+    for (let y = 2; y < 5; y++) {
+        for (let x = 22; x < 26; x++) {
+            const o = (y * width + x) * 4;
+            data[o] = 8;
+            data[o + 1] = 8;
+            data[o + 2] = 10;
+        }
+    }
+    const kept = flattenTraceColors(data, width, height, 64, 8);
+    const mark = (3 * width + 23) * 4;
+    assert.ok(kept.data[mark] < 40);
+    assert.equal(kept.data[4] > 160, true);
+});
+
+test("a staircase contour becomes a short curve", () => {
+    let d = "M0 0";
+    const steps = 24;
+    for (let i = 0; i < steps; i++) d += ` L${i} ${i} L${i + 1} ${i}`;
+    d += ` L${steps} ${steps} L0 ${steps} Z`;
+    const before = (d.match(/[a-z]/gi) || []).length;
+    const smoothed = smoothTracePath(d, 2.8, 0);
+    const after = (smoothed.match(/[a-z]/gi) || []).length;
+    assert.match(smoothed, /C/i);
+    assert.ok(after < before / 2);
 });
 
 test("eight colors trace the photo with no color shift", () => {

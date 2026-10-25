@@ -1,4 +1,5 @@
-import { lineToPath, polylineLength, resizeMask, simplifyOpen, skeletonPolylines } from "./svgTrace.js";
+import { oklabToSrgb, srgbToOklab } from "./colorStudy.js";
+import { lineToPath, polygonArea, polylineLength, resizeMask, simplifyClosed, simplifyOpen, skeletonPolylines } from "./svgTrace.js";
 
 // Ten drawing stages, in paint order. The shape is the domain:
 // a batch is one named layer, scored against the original after it lands.
@@ -55,6 +56,24 @@ export function fidelityTuning(detail, colorCount) {
 
 // visioncortex compares the corner angle in radians. The published config
 // names are degrees, matching the vtracer demo.
+// Fewer colors merge farther in OKLab. Higher detail keeps smaller pieces
+// and follows the contour more tightly. The curve fit still lifts pixel stairs.
+export function traceCleanup(detail, colorCount) {
+    const t = clampUnit((Number(detail) || 0) / 100);
+    const colors = Math.max(3, Math.min(32, Math.round(Number(colorCount) || 8)));
+    const c = clampUnit((colors - 3) / 29);
+    const mergeDist = 0.064 * (1 - c) + 0.012 * c;
+    const minArea = Math.max(2, Math.round((36 - t * 28) * (1 - c * 0.55)));
+    return {
+        mergeDist,
+        minArea,
+        // High color counts stay closer to the picture, so the curves tighten too.
+        epsilon: (4.4 - t * 2.2) * (1 - c * 0.35),
+        filterSpeckle: Math.max(4, Math.round(minArea * 0.65)),
+        paletteCap: Math.round(48 + c * 180),
+    };
+}
+
 export function vtracerConfig({ filterSpeckle, cornerDeg, pathPrecision, binary, layerDifference, colorPrecision }) {
     const rad = (deg) => (deg * Math.PI) / 180;
     return {
@@ -607,6 +626,421 @@ function lineArtLayer(ink, width, height) {
 }
 
 
+function byteChannel(value) {
+    return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function rgbHex(r, g, b) {
+    const channel = (value) => byteChannel(value).toString(16).padStart(2, "0");
+    return `#${channel(r)}${channel(g)}${channel(b)}`;
+}
+
+function parseHex(fill) {
+    const hex = String(fill || "").replace("#", "");
+    if (hex.length < 6) return null;
+    return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)];
+}
+
+function nearestPaint(fill, palette) {
+    const rgb = parseHex(fill);
+    if (!rgb || !palette?.length) return fill;
+    let best = palette[0];
+    let bestD = Infinity;
+    for (let i = 0; i < palette.length; i++) {
+        const paint = palette[i];
+        const d = (rgb[0] - paint[0]) ** 2 + (rgb[1] - paint[1]) ** 2 + (rgb[2] - paint[2]) ** 2;
+        if (d < bestD) {
+            bestD = d;
+            best = paint;
+        }
+    }
+    return rgbHex(best[0], best[1], best[2]);
+}
+
+// Pull JPEG noise and anti-aliased fringes into flat paints, and drop speckles.
+// Hard color steps stay, so a small distant paint (an eye, a trim) is kept.
+export function flattenTraceColors(rgba, width, height, detail, colorCount) {
+    const { mergeDist, minArea, paletteCap } = traceCleanup(detail, colorCount);
+    const pixels = width * height;
+    const out = new Uint8ClampedArray(rgba.length);
+    if (!pixels || !(mergeDist > 0)) return { data: out, palette: [] };
+    const lab = new Float32Array(pixels * 3);
+    const opaque = new Uint8Array(pixels);
+    for (let i = 0; i < pixels; i++) {
+        const o = i * 4;
+        if (rgba[o + 3] < 128) continue;
+        opaque[i] = 1;
+        const p = srgbToOklab(rgba[o] / 255, rgba[o + 1] / 255, rgba[o + 2] / 255);
+        lab[i * 3] = p[0];
+        lab[i * 3 + 1] = p[1];
+        lab[i * 3 + 2] = p[2];
+    }
+    const sigma2 = (mergeDist * 0.45) ** 2;
+    const gate = mergeDist * mergeDist;
+    let cur = lab;
+    for (let pass = 0; pass < 2; pass++) {
+        const next = new Float32Array(cur.length);
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const i = y * width + x;
+                if (!opaque[i]) continue;
+                let sumL = 0;
+                let sumA = 0;
+                let sumB = 0;
+                let weightSum = 0;
+                const l0 = cur[i * 3];
+                const a0 = cur[i * 3 + 1];
+                const b0 = cur[i * 3 + 2];
+                for (let dy = -2; dy <= 2; dy++) {
+                    const yy = y + dy;
+                    if (yy < 0 || yy >= height) continue;
+                    for (let dx = -2; dx <= 2; dx++) {
+                        const xx = x + dx;
+                        if (xx < 0 || xx >= width) continue;
+                        const j = yy * width + xx;
+                        if (!opaque[j]) continue;
+                        const dL = cur[j * 3] - l0;
+                        const dA = cur[j * 3 + 1] - a0;
+                        const dB = cur[j * 3 + 2] - b0;
+                        const d2 = dL * dL + dA * dA + dB * dB;
+                        if (d2 > gate) continue;
+                        const weight = Math.exp(-d2 / (2 * sigma2));
+                        sumL += cur[j * 3] * weight;
+                        sumA += cur[j * 3 + 1] * weight;
+                        sumB += cur[j * 3 + 2] * weight;
+                        weightSum += weight;
+                    }
+                }
+                next[i * 3] = sumL / weightSum;
+                next[i * 3 + 1] = sumA / weightSum;
+                next[i * 3 + 2] = sumB / weightSum;
+            }
+        }
+        cur = next;
+    }
+    const step = Math.max(0.006, mergeDist * 0.5);
+    const bins = new Map();
+    for (let i = 0; i < pixels; i++) {
+        if (!opaque[i]) continue;
+        const key = `${Math.round(cur[i * 3] / step)},${Math.round(cur[i * 3 + 1] / step)},${Math.round(cur[i * 3 + 2] / step)}`;
+        let row = bins.get(key);
+        if (!row) {
+            row = { l: 0, a: 0, b: 0, n: 0 };
+            bins.set(key, row);
+        }
+        row.l += cur[i * 3];
+        row.a += cur[i * 3 + 1];
+        row.b += cur[i * 3 + 2];
+        row.n += 1;
+    }
+    const ordered = [...bins.values()].sort((a, b) => b.n - a.n);
+    const centers = [];
+    for (const row of ordered) {
+        if (centers.length >= paletteCap) break;
+        const p = [row.l / row.n, row.a / row.n, row.b / row.n];
+        let near = false;
+        for (let c = 0; c < centers.length; c++) {
+            const dL = p[0] - centers[c][0];
+            const dA = p[1] - centers[c][1];
+            const dB = p[2] - centers[c][2];
+            if (dL * dL + dA * dA + dB * dB <= gate) {
+                near = true;
+                break;
+            }
+        }
+        if (!near) centers.push(p);
+    }
+    if (!centers.length) return { data: out, palette: [] };
+    const palette = centers.map((center) => {
+        const rgb = oklabToSrgb(center[0], center[1], center[2]);
+        return [byteChannel(rgb[0] * 255), byteChannel(rgb[1] * 255), byteChannel(rgb[2] * 255)];
+    });
+    const labels = new Int16Array(pixels);
+    labels.fill(-1);
+    for (let i = 0; i < pixels; i++) {
+        if (!opaque[i]) continue;
+        let best = 0;
+        let bestD = Infinity;
+        for (let c = 0; c < centers.length; c++) {
+            const dL = cur[i * 3] - centers[c][0];
+            const dA = cur[i * 3 + 1] - centers[c][1];
+            const dB = cur[i * 3 + 2] - centers[c][2];
+            const d2 = dL * dL + dA * dA + dB * dB;
+            if (d2 < bestD) {
+                bestD = d2;
+                best = c;
+            }
+        }
+        labels[i] = best;
+        const o = i * 4;
+        out[o] = palette[best][0];
+        out[o + 1] = palette[best][1];
+        out[o + 2] = palette[best][2];
+        out[o + 3] = 255;
+    }
+    for (let pass = 0; pass < 2; pass++) {
+        const seen = new Uint8Array(pixels);
+        const stack = [];
+        for (let start = 0; start < pixels; start++) {
+            if (seen[start] || labels[start] < 0) continue;
+            const label = labels[start];
+            stack.length = 0;
+            stack.push(start);
+            seen[start] = 1;
+            const members = [];
+            const touch = new Map();
+            while (stack.length) {
+                const i = stack.pop();
+                members.push(i);
+                const x = i % width;
+                const y = (i / width) | 0;
+                const neighbors = [];
+                if (x > 0) neighbors.push(i - 1);
+                if (x + 1 < width) neighbors.push(i + 1);
+                if (y > 0) neighbors.push(i - width);
+                if (y + 1 < height) neighbors.push(i + width);
+                for (let n = 0; n < neighbors.length; n++) {
+                    const index = neighbors[n];
+                    if (labels[index] < 0) continue;
+                    if (labels[index] === label) {
+                        if (!seen[index]) {
+                            seen[index] = 1;
+                            stack.push(index);
+                        }
+                        continue;
+                    }
+                    touch.set(labels[index], (touch.get(labels[index]) || 0) + 1);
+                }
+            }
+            if (members.length >= minArea || !touch.size) continue;
+            let host = label;
+            let nearest = Infinity;
+            for (const id of touch.keys()) {
+                const dL = centers[label][0] - centers[id][0];
+                const dA = centers[label][1] - centers[id][1];
+                const dB = centers[label][2] - centers[id][2];
+                const dist = dL * dL + dA * dA + dB * dB;
+                if (dist < nearest) {
+                    nearest = dist;
+                    host = id;
+                }
+            }
+            // A small island of a genuinely different paint stays. One-pixel
+            // noise is absorbed even when the color is far.
+            if (members.length >= 3 && nearest > 0.18 * 0.18) continue;
+            const paint = palette[host];
+            for (let m = 0; m < members.length; m++) {
+                const i = members[m];
+                labels[i] = host;
+                const o = i * 4;
+                out[o] = paint[0];
+                out[o + 1] = paint[1];
+                out[o + 2] = paint[2];
+            }
+        }
+    }
+    const used = [];
+    const seenPaint = new Set();
+    for (let i = 0; i < pixels; i++) {
+        if (labels[i] < 0 || seenPaint.has(labels[i])) continue;
+        seenPaint.add(labels[i]);
+        used.push(palette[labels[i]]);
+    }
+    return { data: out, palette: used };
+}
+
+function fmtCoord(n) {
+    const v = Math.round(n * 100) / 100;
+    return Object.is(v, -0) ? "0" : String(v);
+}
+
+function turnAbs(ax, ay, bx, by, cx, cy) {
+    const v1x = ax - bx;
+    const v1y = ay - by;
+    const v2x = cx - bx;
+    const v2y = cy - by;
+    return Math.abs(Math.atan2(v1x * v2y - v1y * v2x, v1x * v2x + v1y * v2y));
+}
+
+function sampleSubpaths(d) {
+    const tokens = String(d || "").match(/[a-zA-Z]|-?\d*\.?\d+(?:e[-+]?\d+)?/gi) || [];
+    const rings = [];
+    let index = 0;
+    let x = 0;
+    let y = 0;
+    let sx = 0;
+    let sy = 0;
+    let ring = [];
+    const push = (px, py) => {
+        if (!ring.length || Math.hypot(px - ring[ring.length - 2], py - ring[ring.length - 1]) > 0.2) ring.push(px, py);
+        x = px;
+        y = py;
+    };
+    const cubic = (x1, y1, x2, y2, x3, y3) => {
+        const dist = Math.hypot(x1 - x, y1 - y) + Math.hypot(x2 - x1, y2 - y1) + Math.hypot(x3 - x2, y3 - y2);
+        const steps = Math.max(1, Math.ceil(dist / 0.8));
+        for (let s = 1; s <= steps; s++) {
+            const t = s / steps;
+            const u = 1 - t;
+            push(
+                u * u * u * x + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3,
+                u * u * u * y + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3
+            );
+        }
+    };
+    while (index < tokens.length) {
+        if (!/^[a-zA-Z]$/.test(tokens[index])) {
+            index += 1;
+            continue;
+        }
+        const command = tokens[index];
+        index += 1;
+        const op = command.toUpperCase();
+        const relative = command !== op;
+        const take = () => Number(tokens[index++]);
+        const xy = () => {
+            const nx = take();
+            const ny = take();
+            return [relative ? x + nx : nx, relative ? y + ny : ny];
+        };
+        if (op === "M") {
+            if (ring.length >= 6) rings.push(ring);
+            ring = [];
+            const [nx, ny] = xy();
+            x = sx = nx;
+            y = sy = ny;
+            ring.push(nx, ny);
+            while (index < tokens.length && !/^[a-zA-Z]$/.test(tokens[index])) push(...xy());
+        } else if (op === "L") {
+            while (index < tokens.length && !/^[a-zA-Z]$/.test(tokens[index])) push(...xy());
+        } else if (op === "C") {
+            while (index + 5 < tokens.length && !/^[a-zA-Z]$/.test(tokens[index])) {
+                const [x1, y1] = xy();
+                const [x2, y2] = xy();
+                const [x3, y3] = xy();
+                cubic(x1, y1, x2, y2, x3, y3);
+            }
+        } else if (op === "Q") {
+            while (index + 3 < tokens.length && !/^[a-zA-Z]$/.test(tokens[index])) {
+                const [x1, y1] = xy();
+                const [x2, y2] = xy();
+                const steps = Math.max(1, Math.ceil((Math.hypot(x1 - x, y1 - y) + Math.hypot(x2 - x1, y2 - y1)) / 0.8));
+                for (let s = 1; s <= steps; s++) {
+                    const t = s / steps;
+                    const u = 1 - t;
+                    push(u * u * x + 2 * u * t * x1 + t * t * x2, u * u * y + 2 * u * t * y1 + t * t * y2);
+                }
+            }
+        } else if (op === "Z") {
+            push(sx, sy);
+            if (ring.length >= 6) rings.push(ring);
+            ring = [];
+        }
+    }
+    if (ring.length >= 6) rings.push(ring);
+    return rings;
+}
+
+function decimateRing(points, maxPoints) {
+    const n = points.length / 2;
+    if (n <= maxPoints) return points;
+    const step = n / maxPoints;
+    const out = [];
+    for (let i = 0; i < maxPoints; i++) {
+        const k = Math.floor(i * step) * 2;
+        out.push(points[k], points[k + 1]);
+    }
+    return out;
+}
+
+function smoothRing(points, epsilon) {
+    let ring = points;
+    const count = ring.length / 2;
+    if (count >= 2 && Math.hypot(ring[0] - ring[ring.length - 2], ring[1] - ring[ring.length - 1]) < 0.4) {
+        ring = ring.slice(0, -2);
+    }
+    if (ring.length < 6) return "";
+    const peri = polylineLength(ring, true);
+    const eps = Math.min(epsilon, Math.max(0.85, peri / 48));
+    const simplified = simplifyClosed(decimateRing(ring, 2400), eps);
+    const n = simplified.length / 2;
+    if (n < 3) return "";
+    const corner = [];
+    for (let i = 0; i < n; i++) {
+        const prev = (i + n - 1) % n;
+        const next = (i + 1) % n;
+        corner[i] =
+            turnAbs(
+                simplified[prev * 2],
+                simplified[prev * 2 + 1],
+                simplified[i * 2],
+                simplified[i * 2 + 1],
+                simplified[next * 2],
+                simplified[next * 2 + 1]
+            ) > 0.9;
+    }
+    const at = (index) => {
+        const i = ((index % n) + n) % n;
+        return [simplified[i * 2], simplified[i * 2 + 1]];
+    };
+    let d = `M${fmtCoord(simplified[0])} ${fmtCoord(simplified[1])}`;
+    for (let i = 0; i < n; i++) {
+        const [x1, y1] = at(i);
+        const [x2, y2] = at(i + 1);
+        const [x0, y0] = at(i - 1);
+        const [x3, y3] = at(i + 2);
+        let c1x = x1 + (x2 - x0) / 6;
+        let c1y = y1 + (y2 - y0) / 6;
+        let c2x = x2 - (x3 - x1) / 6;
+        let c2y = y2 - (y3 - y1) / 6;
+        if (corner[i] && corner[(i + 1) % n]) {
+            c1x = x1 + (x2 - x1) / 3;
+            c1y = y1 + (y2 - y1) / 3;
+            c2x = x1 + ((x2 - x1) * 2) / 3;
+            c2y = y1 + ((y2 - y1) * 2) / 3;
+        } else {
+            if (corner[i]) {
+                c1x = x1 + (x2 - x1) * 0.2;
+                c1y = y1 + (y2 - y1) * 0.2;
+            }
+            if (corner[(i + 1) % n]) {
+                c2x = x2 - (x2 - x1) * 0.2;
+                c2y = y2 - (y2 - y1) * 0.2;
+            }
+        }
+        d += `C${fmtCoord(c1x)} ${fmtCoord(c1y)} ${fmtCoord(c2x)} ${fmtCoord(c2y)} ${fmtCoord(x2)} ${fmtCoord(y2)}`;
+    }
+    return `${d}Z`;
+}
+
+// Sample the tracer curves, drop specks, and refit. Pixel stairs become a
+// few cubics. Sharp corners stay sharp. A straight span stays straight.
+export function smoothTracePath(d, epsilon, minArea = 0) {
+    const rings = sampleSubpaths(d);
+    const parts = [];
+    for (let i = 0; i < rings.length; i++) {
+        if (minArea > 0 && polygonArea(rings[i]) < minArea) continue;
+        const next = smoothRing(rings[i], epsilon);
+        if (next) parts.push(next);
+    }
+    return parts.join("");
+}
+
+function finishPaths(paths, epsilon, minArea, palette) {
+    const out = [];
+    for (let i = 0; i < paths.length; i++) {
+        const path = paths[i];
+        const smoothed = smoothTracePath(path.d, epsilon, minArea);
+        if (!smoothed) {
+            if (minArea > 0) continue;
+            out.push({ ...path, fill: nearestPaint(path.fill, palette) });
+            continue;
+        }
+        out.push({ ...path, d: smoothed, fill: nearestPaint(path.fill, palette) });
+    }
+    return out;
+}
+
 export async function buildDrawnTrace({
     data,
     width,
@@ -620,9 +1054,11 @@ export async function buildDrawnTrace({
     if (typeof traceSvg !== "function") throw new Error("traceSvg required");
     const tuning = traceTuning(detail);
     const fidelity = fidelityTuning(detail, colorCount);
+    const cleanup = traceCleanup(detail, colorCount);
     const cap = elementCap(detail);
     const current = blankCanvas(data);
-    const edges = edgeImage(data, width, height);
+    const prepared = flattenTraceColors(data, width, height, detail, colorCount);
+    const edges = edgeImage(prepared.data, width, height);
     const batches = [];
 
     const report = (plan) => {
@@ -641,11 +1077,12 @@ export async function buildDrawnTrace({
         vtracerConfig({
             ...tuning,
             binary: true,
+            filterSpeckle: Math.max(tuning.filterSpeckle, 28),
             colorPrecision: 6,
             layerDifference: 8,
         })
     );
-    const edgePaths = orderPaths(parseSvgPaths(edgeSvg), cap);
+    const edgePaths = finishPaths(orderPaths(parseSvgPaths(edgeSvg), cap), cleanup.epsilon * 1.7, 12, null);
     const splitAt = Math.max(1, Math.ceil(edgePaths.length * (BATCH_PLAN[0].share / (BATCH_PLAN[0].share + BATCH_PLAN[1].share))));
     const construction = [edgePaths.slice(0, splitAt), edgePaths.slice(splitAt)];
     for (let index = 0; index < 2; index++) {
@@ -660,11 +1097,11 @@ export async function buildDrawnTrace({
 
     report(BATCH_PLAN[2]);
     const colorSvg = await traceSvg(
-        data,
+        prepared.data,
         width,
         height,
         vtracerConfig({
-            filterSpeckle: fidelity.filterSpeckle,
+            filterSpeckle: Math.max(fidelity.filterSpeckle, cleanup.filterSpeckle),
             cornerDeg: fidelity.cornerDeg,
             pathPrecision: fidelity.pathPrecision,
             binary: false,
@@ -673,7 +1110,10 @@ export async function buildDrawnTrace({
         })
     );
     const colorPlans = BATCH_PLAN.slice(2);
-    const buckets = assignColorPaths(parseSvgPaths(colorSvg), colorPlans);
+    const buckets = assignColorPaths(
+        finishPaths(parseSvgPaths(colorSvg), cleanup.epsilon, cleanup.minArea, prepared.palette),
+        colorPlans
+    );
     colorPlans.forEach((plan, index) => {
         if (index > 0) report(plan);
         batches.push({ ...plan, paths: buckets[index] });
