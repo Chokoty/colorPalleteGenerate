@@ -426,7 +426,7 @@ export default function SvgPanel({
                 </label>
             </div>
             <p className="svg-note">
-                원본 픽셀만 곡선으로 따서 큰 면부터 작은 면 순으로 쌓습니다. 색 수는 뽑은 팔레트 개수가 아닙니다. 3은 비슷한 색을 많이 합치고, 32는 원본 색을 거의 그대로 남깁니다. 앞의 두 선은 마지막에 사라집니다.
+                가까운 색은 한 면으로 합치고, 픽셀 계단은 곡선으로 펴서 큰 면부터 쌓습니다. 색 수는 뽑은 팔레트 개수가 아닙니다. 3은 비슷한 색을 많이 합치고, 32는 원본 색을 거의 그대로 남깁니다. 앞의 두 선은 마지막에 사라집니다.
             </p>
             <div className="svg-actions">
                 <button type="button" className="mode-tab" onClick={() => save(false)} disabled={!layerCount}>
