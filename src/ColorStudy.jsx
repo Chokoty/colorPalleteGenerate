@@ -21,6 +21,7 @@ export function StudyControls({ study, samples, activeSampleId, onOpenSample }) 
                 <li>스포이드로 그림의 밝은 부분을 집으면 그 색이 빛 색이 됩니다.</li>
                 <li>가운데는 그 빛을 뺀 밑색입니다. 구분선을 옮겨 원본과 비교합니다.</li>
                 <li>오른쪽 목록에서 밑색, 그림자, 빛을 켜고 끕니다.</li>
+                <li>빛·반사에서 흑백으로 값을 본 뒤, 반사와 앰비언트 순서로 색을 올립니다.</li>
             </ol>
             <div className="sample-picker" role="group" aria-label="예시 그림">
                 {samples.map((sample) => (
@@ -161,6 +162,12 @@ export function StudyControls({ study, samples, activeSampleId, onOpenSample }) 
 }
 
 function studyHint(study) {
+    if (study.view === "glaze") {
+        if (study.glazeStage === "value") return "색을 빼고 밝기만 봅니다. 명암을 먼저 읽습니다.";
+        if (study.glazeStage === "reflection") return "어두운 쪽에 차가운 반사색을 올립니다.";
+        if (study.glazeStage === "ambient") return "밝은 쪽에 따뜻한 빛 색을 올립니다. 반사는 그대로 있습니다.";
+        return "어두운 쪽은 반사색, 밝은 쪽은 빛 색인 그라디언트 맵입니다.";
+    }
     if (study.view === "compose") {
         return "밑색 위에 그림자와 빛을 다시 겹친 모습입니다. 오른쪽 목록에서 하나씩 켜고 끄세요.";
     }
@@ -212,6 +219,7 @@ export function StudyTools({ study }) {
                     ["divide", "나누기"],
                     ["compose", "재구성"],
                     ["reverse", "밑색×빛"],
+                    ["glaze", "빛·반사"],
                 ].map(([id, label]) => (
                     <button
                         key={id}
@@ -240,6 +248,9 @@ export function StudyTools({ study }) {
                     <span>빛 제거</span>
                 </label>
             )}
+            {study.view === "glaze" ? (
+                <GlazeControls study={study} />
+            ) : (
             <div className="study-decompose">
                 <label>
                     밑색 최대 {study.baseCount}
@@ -291,6 +302,144 @@ export function StudyTools({ study }) {
                     />
                 </label>
             </div>
+            )}
+        </div>
+    );
+}
+
+function GlazeControls({ study }) {
+    const paintStages = study.glazeStage === "reflection" || study.glazeStage === "ambient";
+    return (
+        <>
+            <div className="study-tool-row" role="group" aria-label="빛·반사 단계">
+                {[
+                    ["value", "흑백"],
+                    ["reflection", "반사"],
+                    ["ambient", "앰비언트"],
+                    ["gradient", "그라디언트 맵"],
+                ].map(([id, label]) => (
+                    <button
+                        key={id}
+                        type="button"
+                        className={`mode-tab${study.glazeStage === id ? " mode-tab-active" : ""}`}
+                        aria-pressed={study.glazeStage === id}
+                        onClick={() => study.setGlazeStage(id)}
+                    >
+                        {label}
+                    </button>
+                ))}
+            </div>
+            {paintStages ? (
+                <div className="study-tool-row" role="group" aria-label="블렌드">
+                    {[
+                        ["overlay", "Overlay"],
+                        ["color", "Color"],
+                        ["soft-light", "Soft Light"],
+                    ].map(([id, label]) => (
+                        <button
+                            key={id}
+                            type="button"
+                            className={`mode-tab${study.glazeMode === id ? " mode-tab-active" : ""}`}
+                            aria-pressed={study.glazeMode === id}
+                            onClick={() => study.setGlazeMode(id)}
+                        >
+                            {label}
+                        </button>
+                    ))}
+                </div>
+            ) : (
+                <p className="study-note">
+                    {study.glazeStage === "gradient"
+                        ? "밝기로 반사색과 빛 색을 잇습니다."
+                        : "색을 올리기 전의 밝기입니다."}
+                </p>
+            )}
+            <label>
+                강도 {study.glazeIntensity}%
+                <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={study.glazeIntensity}
+                    aria-label="빛·반사 강도"
+                    disabled={study.glazeStage === "value"}
+                    onChange={(event) => study.setGlazeIntensity(Number(event.target.value))}
+                />
+            </label>
+            <GlazeColor
+                name="light"
+                title="빛 색"
+                note="밝은 쪽 · 따뜻함"
+                hex={study.glazeLightHex}
+                active={study.glazeTarget === "light"}
+                onPick={() => study.setGlazeTarget("light")}
+                onColor={(rgb) => study.setGlazeLight(rgb)}
+                parse={study.hexToRgb255}
+            />
+            <GlazeColor
+                name="reflection"
+                title="반사 색"
+                note={study.reflectionCustom ? "직접 고른 색" : "어두운 쪽 · 추천 짝"}
+                hex={study.glazeReflectionHex}
+                active={study.glazeTarget === "reflection"}
+                onPick={() => study.setGlazeTarget("reflection")}
+                onColor={(rgb) => study.setGlazeReflection(rgb)}
+                parse={study.hexToRgb255}
+            />
+            <p className="study-note">
+                빛 색을 고르면 차가운 반사색을 짝으로 제안합니다. 스포이드는 선택한 칸에 집습니다.
+            </p>
+            <div className="study-tool-row">
+                <button type="button" className="study-text-btn" onClick={study.resetGlazeReflection}>
+                    추천 반사
+                </button>
+                <button
+                    type="button"
+                    className="mode-tab"
+                    onClick={study.exportGlaze}
+                    disabled={!study.glazeReady}
+                >
+                    PNG 저장
+                </button>
+            </div>
+            {study.glazeError ? <p className="study-note">{study.glazeError}</p> : null}
+            {study.view === "glaze" && !study.glazeReady && !study.glazeError ? (
+                <p className="study-note" aria-live="polite">
+                    값을 계산하는 중
+                </p>
+            ) : null}
+        </>
+    );
+}
+
+function GlazeColor({ name, title, note, hex, active, onPick, onColor, parse }) {
+    return (
+        <div className="study-light-row">
+            <button
+                type="button"
+                className={`mode-tab${active ? " mode-tab-active" : ""}`}
+                aria-pressed={active}
+                aria-label={`${title} 스포이드`}
+                onClick={onPick}
+            >
+                {name === "light" ? "빛" : "반사"}
+            </button>
+            <input
+                className="study-light-chip"
+                type="color"
+                value={hex}
+                aria-label={title}
+                onChange={(event) => {
+                    const rgb = parse(event.target.value);
+                    if (rgb) onColor(rgb);
+                }}
+            />
+            <span className="study-light-copy">
+                <strong>{hex}</strong>
+                <span>
+                    {title} · {note}
+                </span>
+            </span>
         </div>
     );
 }
@@ -309,7 +458,7 @@ export function StudyStage({ study }) {
         if (!size) return;
         const point = bitmapPoint(event, event.currentTarget, size.width, size.height);
         event.currentTarget.setPointerCapture(event.pointerId);
-        if (study.tool === "pick") {
+        if (study.view === "glaze" || study.tool === "pick") {
             dragRef.current = point;
             return;
         }
@@ -320,7 +469,7 @@ export function StudyStage({ study }) {
     const onPointerMove = (event) => {
         if (!size || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
         const point = bitmapPoint(event, event.currentTarget, size.width, size.height);
-        if (study.tool === "pick") {
+        if (study.view === "glaze" || study.tool === "pick") {
             if (dragRef.current) dragRef.current.end = point;
             return;
         }
@@ -330,10 +479,11 @@ export function StudyStage({ study }) {
     const onPointerUp = (event) => {
         if (!size) return;
         const point = bitmapPoint(event, event.currentTarget, size.width, size.height);
-        if (study.tool === "pick" && dragRef.current) {
+        if ((study.view === "glaze" || study.tool === "pick") && dragRef.current) {
             const start = dragRef.current;
             const end = start.end ?? point;
-            study.pickLight(start.x, start.y, end.x, end.y);
+            if (study.view === "glaze") study.pickGlaze(start.x, start.y, end.x, end.y);
+            else study.pickLight(start.x, start.y, end.x, end.y);
         } else if (study.tool !== "pick") {
             study.commitMask();
         }
@@ -349,8 +499,8 @@ export function StudyStage({ study }) {
                     ) : (
                         <canvas
                             ref={canvasRef}
-                            className="stage-canvas checker-bg"
-                            aria-label="채색 공부 미리보기"
+                            className={`stage-canvas checker-bg${study.view === "glaze" ? " is-glaze" : ""}`}
+                            aria-label={study.view === "glaze" ? "빛·반사 미리보기" : "채색 공부 미리보기"}
                             onPointerDown={onPointerDown}
                             onPointerMove={onPointerMove}
                             onPointerUp={onPointerUp}

@@ -7,6 +7,7 @@ import {
     layerPlate,
     rgb255ToHex,
 } from "./colorStudy";
+import { DEFAULT_GLAZE_LIGHT, recommendReflection } from "./lightReflection";
 
 export const STUDY_MAX_SIDE = 640;
 
@@ -54,6 +55,26 @@ function rgbaToThumb(rgba, width, height) {
     const ctx = thumb.getContext("2d");
     ctx.drawImage(src, 0, 0, fitted.width, fitted.height);
     return thumb.toDataURL("image/png");
+}
+
+const GLAZE_FILE = {
+    value: "흑백",
+    reflection: "반사",
+    ambient: "앰비언트",
+    gradient: "그라디언트맵",
+};
+
+function glazeFrameKey(analysis, stage, mode, intensity, light, reflection) {
+    if (!analysis) return "";
+    return [
+        analysis.width,
+        analysis.height,
+        stage,
+        mode,
+        intensity,
+        light.join(","),
+        reflection.join(","),
+    ].join("|");
 }
 
 function buildThumbs(analysis) {
@@ -109,12 +130,27 @@ export function useColorStudy(imageRef, uploadId, enabled) {
     const [bgVisible, setBgVisible] = useState(true);
     const [maskTick, setMaskTick] = useState(0);
     const [maskVersion, setMaskVersion] = useState(0);
+    const [glazeLight, setGlazeLightState] = useState(DEFAULT_GLAZE_LIGHT);
+    const [glazeReflection, setGlazeReflectionState] = useState(() => recommendReflection(DEFAULT_GLAZE_LIGHT).rgb);
+    const [reflectionCustom, setReflectionCustom] = useState(false);
+    const [glazeStage, setGlazeStage] = useState("value");
+    const [glazeMode, setGlazeMode] = useState("overlay");
+    const [glazeIntensity, setGlazeIntensity] = useState(85);
+    const [glazeTarget, setGlazeTarget] = useState("light");
+    const [glazeFrame, setGlazeFrame] = useState(null);
+    const [glazeError, setGlazeError] = useState("");
     const maskRef = useRef(null);
     const analysisRef = useRef(null);
     const signatureRef = useRef("");
     const overridesRef = useRef(overrides);
+    const reflectionCustomRef = useRef(false);
+    const glazeTargetRef = useRef("light");
+    const workerRef = useRef(null);
+    const jobRef = useRef(0);
+    const pendingKeysRef = useRef(new Map());
     analysisRef.current = analysis;
     overridesRef.current = overrides;
+    glazeTargetRef.current = glazeTarget;
 
     useEffect(() => {
         maskRef.current = null;
@@ -197,9 +233,116 @@ export function useColorStudy(imageRef, uploadId, enabled) {
         smooth,
     ]);
 
+    useEffect(() => {
+        if (!enabled || view !== "glaze") return undefined;
+        const worker = new Worker(new URL("./lightReflection.worker.js", import.meta.url), { type: "module" });
+        workerRef.current = worker;
+        worker.onmessage = (event) => {
+            const data = event.data;
+            if (!data || data.id !== jobRef.current) return;
+            const key = pendingKeysRef.current.get(data.id) ?? "";
+            pendingKeysRef.current.delete(data.id);
+            if (!data.ok || !data.rgba) {
+                setGlazeError("빛·반사를 그리지 못했습니다.");
+                return;
+            }
+            setGlazeError("");
+            setGlazeFrame({ key, rgba: new Uint8ClampedArray(data.rgba) });
+        };
+        worker.onerror = () => setGlazeError("빛·반사를 그리지 못했습니다.");
+        return () => {
+            worker.terminate();
+            if (workerRef.current === worker) workerRef.current = null;
+        };
+    }, [enabled, view]);
+
+    useEffect(() => {
+        const worker = workerRef.current;
+        if (!enabled || view !== "glaze" || !worker) return undefined;
+        const current = analysis && analysis.uploadId === uploadId ? analysis : null;
+        if (!current?.source) return undefined;
+        const params = {
+            stage: glazeStage,
+            light: glazeLight,
+            reflection: glazeReflection,
+            mode: glazeMode,
+            intensity: glazeIntensity / 100,
+        };
+        const key = glazeFrameKey(current, glazeStage, glazeMode, glazeIntensity, glazeLight, glazeReflection);
+        const id = ++jobRef.current;
+        pendingKeysRef.current.set(id, key);
+        const { width, height } = current;
+        const copy = new Uint8ClampedArray(current.source);
+        const timer = setTimeout(() => {
+            if (workerRef.current !== worker) return;
+            worker.postMessage({ id, rgba: copy.buffer, width, height, params }, [copy.buffer]);
+        }, 32);
+        return () => clearTimeout(timer);
+    }, [
+        enabled,
+        view,
+        analysis,
+        uploadId,
+        glazeStage,
+        glazeLight,
+        glazeReflection,
+        glazeMode,
+        glazeIntensity,
+    ]);
+
     const setLevels = (next) => {
         setLevelsState(next);
         setThreshold(next === 2 ? 0 : 0.06);
+    };
+
+    const setGlazeLight = (rgb) => {
+        setGlazeLightState(rgb);
+        if (!reflectionCustomRef.current) setGlazeReflectionState(recommendReflection(rgb).rgb);
+    };
+
+    const setGlazeReflection = (rgb) => {
+        reflectionCustomRef.current = true;
+        setReflectionCustom(true);
+        setGlazeReflectionState(rgb);
+    };
+
+    const resetGlazeReflection = () => {
+        reflectionCustomRef.current = false;
+        setReflectionCustom(false);
+        setGlazeReflectionState(recommendReflection(glazeLight).rgb);
+    };
+
+    const pickGlaze = (x0, y0, x1 = x0, y1 = y0) => {
+        const current = analysisRef.current;
+        if (!current?.source) return;
+        const pad = x0 === x1 && y0 === y1 ? 2 : 0;
+        const color = averageRect(
+            current.source,
+            current.width,
+            current.height,
+            x0 - pad,
+            y0 - pad,
+            x1 + pad,
+            y1 + pad
+        );
+        if (!color) return;
+        if (glazeTargetRef.current === "reflection") setGlazeReflection(color);
+        else setGlazeLight(color);
+    };
+
+    const exportGlaze = () => {
+        const current = analysisRef.current;
+        if (!current || view !== "glaze" || !glazeFrame?.rgba) return;
+        const key = glazeFrameKey(current, glazeStage, glazeMode, glazeIntensity, glazeLight, glazeReflection);
+        if (glazeFrame.key !== key || glazeFrame.rgba.length !== current.width * current.height * 4) return;
+        const canvas = document.createElement("canvas");
+        canvas.width = current.width;
+        canvas.height = current.height;
+        canvas.getContext("2d").putImageData(new ImageData(glazeFrame.rgba, current.width, current.height), 0, 0);
+        const link = document.createElement("a");
+        link.href = canvas.toDataURL("image/png");
+        link.download = `빛반사-${GLAZE_FILE[glazeStage] || glazeStage}.png`;
+        link.click();
     };
 
     const pickLight = (x0, y0, x1 = x0, y1 = y0) => {
@@ -364,6 +507,30 @@ export function useColorStudy(imageRef, uploadId, enabled) {
         setAllVisible,
         colorsModified,
         hexToRgb255,
+        glazeLight,
+        glazeLightHex: rgb255ToHex(glazeLight),
+        setGlazeLight,
+        glazeReflection,
+        glazeReflectionHex: rgb255ToHex(glazeReflection),
+        setGlazeReflection,
+        reflectionCustom,
+        resetGlazeReflection,
+        glazeStage,
+        setGlazeStage,
+        glazeMode,
+        setGlazeMode,
+        glazeIntensity,
+        setGlazeIntensity,
+        glazeTarget,
+        setGlazeTarget,
+        glazeFrame: glazeFrame?.rgba ?? null,
+        glazeReady:
+            Boolean(analysis && analysis.uploadId === uploadId) &&
+            glazeFrame?.key ===
+                glazeFrameKey(analysis, glazeStage, glazeMode, glazeIntensity, glazeLight, glazeReflection),
+        glazeError,
+        pickGlaze,
+        exportGlaze,
     };
 }
 
@@ -371,12 +538,20 @@ export function paintStudyCanvas(canvas, study) {
     const analysis = study.analysis;
     if (!canvas || !analysis) return;
     const { width, height } = analysis;
+    if (
+        study.view === "glaze" &&
+        (!study.glazeReady || !study.glazeFrame || study.glazeFrame.length !== width * height * 4)
+    ) {
+        return;
+    }
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     let rgba;
-    if (study.view === "compose") {
+    if (study.view === "glaze") {
+        rgba = study.glazeFrame;
+    } else if (study.view === "compose") {
         rgba = compositeStudy(analysis, {
             shadow: study.shadowVisible,
             light: study.lightVisible,

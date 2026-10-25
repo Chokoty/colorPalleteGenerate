@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { constructionOpacity, drawnToSvg, measureError, TRACE_MAX_SIDE } from "./drawnTrace.js";
 import { downscaleRgba } from "./useColorStudy";
+import { PlaybackBar } from "./ui/PlaybackBar";
 import { ReplayChrome } from "./ui/ReplayChrome";
 import { strokeReplayStyle } from "./ui/strokeReplay";
 
@@ -36,44 +37,16 @@ function DrawingTimeline({ picture, shown, playing, speed, status, progressTitle
 
     return (
         <div className="svg-timeline">
-            <div className="svg-playback" role="group" aria-label="그리기 재생">
-                <button type="button" className="mode-tab svg-play" onClick={onPlay} disabled={!count} aria-pressed={playing}>
-                    {playLabel}
-                </button>
-                <label className="svg-scrub">
-                    <input
-                        type="range"
-                        min="0"
-                        max={Math.max(count, 1)}
-                        step="1"
-                        value={Math.min(shown, count)}
-                        disabled={!count}
-                        aria-label="장면"
-                        aria-valuemin={0}
-                        aria-valuemax={count}
-                        aria-valuenow={shown}
-                        aria-valuetext={count ? `${shown} / ${count}` : "준비 중"}
-                        onChange={(event) => onSeek(Number(event.target.value))}
-                    />
-                </label>
-                <span className="svg-scrub-readout">{count ? `${shown}/${count}` : "—"}</span>
-            </div>
-            <label className="svg-speed">
-                속도 {speed.toFixed(1)}×
-                <input
-                    type="range"
-                    min="0.1"
-                    max="2"
-                    step="0.1"
-                    value={speed}
-                    aria-label="재생 속도"
-                    aria-valuemin={0.1}
-                    aria-valuemax={2}
-                    aria-valuenow={speed}
-                    aria-valuetext={`${speed.toFixed(1)}배`}
-                    onChange={(event) => onSpeed(Number(event.target.value))}
-                />
-            </label>
+            <PlaybackBar
+                count={count}
+                shown={shown}
+                playing={playing}
+                speed={speed}
+                playLabel={playLabel}
+                onPlay={onPlay}
+                onSeek={onSeek}
+                onSpeed={onSpeed}
+            />
             {!count && (
                 <p className="svg-note">
                     {status === "tracing"
