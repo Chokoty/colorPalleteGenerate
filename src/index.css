@@ -431,6 +431,12 @@ b {
     color: var(--paper);
 }
 
+.mode-tab.mode-tab-mark:not([aria-selected="true"]) {
+    font-weight: 500;
+    border-width: 2px;
+    padding: 7px 11px;
+}
+
 .mode-tab:disabled,
 .ink-btn:disabled,
 .settings-panel-apply-btn:disabled,
@@ -1749,6 +1755,68 @@ input[type="checkbox"] {
     flex-direction: column;
     gap: 4px;
     font-size: 12px;
+}
+
+.render-layers {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+}
+
+.render-disclaimer,
+.render-wait {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--ink);
+}
+
+.render-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.render-layer-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.render-layer-list .layer-row {
+    align-items: flex-start;
+}
+
+.render-layer-list .layer-name-top {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+}
+
+.render-layer-list .layer-name-top strong {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+}
+
+.render-strength {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--ink-soft);
+}
+
+.render-strength input,
+.svg-speed input {
+    width: 100%;
+}
+
+.render-png {
+    flex: 0 0 auto;
+    min-height: 28px;
+    padding: 4px 8px;
 }
 
 .svg-layer-list {

@@ -12,10 +12,12 @@ import {
 import { gradientEdges } from "./imageOutline";
 import { extractLineArt } from "./lineartModel";
 import { StudyControls, StudyLayers, StudyStage, StudySummary, StudyTools } from "./ColorStudy";
+import { RenderLayerPanel, RenderLayerStage } from "./RenderLayers";
 import { StartGuide } from "./StartGuide";
 import { DEFAULT_SAMPLE, SAMPLES } from "./samples";
 import SvgPanel from "./SvgPanel";
 import { useColorStudy } from "./useColorStudy";
+import { useRenderLayers } from "./useRenderLayers";
 import { ReplayChrome } from "./ui/ReplayChrome";
 import { addPick, centersWithPicks, pickAt, removePick, restorePicks, rgb01ToHex } from "./pickedColors";
 import { tintedShadowPixel } from "./shadowTint";
@@ -470,6 +472,7 @@ function App() {
     const manualCountRef = useRef(6);
     const modeRef = useRef("auto");
     const study = useColorStudy(imageRef, uploadId, mode === "study");
+    const renderLayers = useRenderLayers(imageRef, uploadId, mode === "layers");
     const [replayOpen, setReplayOpen] = useState(false);
     const [replayMenu, setReplayMenu] = useState(false);
     const [svgReplay, setSvgReplay] = useState(false);
@@ -724,7 +727,10 @@ function App() {
                         height: img.height,
                     });
                     setActiveSampleId(source === "upload" ? null : source);
-                    if (modeRef.current !== "study") {
+                    if (modeRef.current === "layers") {
+                        setClusters([]);
+                        setLayerImages([]);
+                    } else if (modeRef.current !== "study") {
                         runCurrent(
                             stored,
                             modeRef.current,
@@ -803,10 +809,11 @@ function App() {
 
     const switchMode = (nextMode) => {
         if (nextMode === "study") setStudyOpen(true);
+        if (nextMode === "layers") setCenterTab("recolor");
         if (nextMode === modeRef.current) return;
         modeRef.current = nextMode;
         setMode(nextMode);
-        if (nextMode === "study") return;
+        if (nextMode === "study" || nextMode === "layers") return;
         if (!imageRef.current) {
             setClusterCount(nextMode === "manual" ? manualCountRef.current : clusterCount);
             return;
@@ -1411,12 +1418,13 @@ function App() {
     };
 
     const renderModeTabs = (includeStudy = false) => (
-        <div role="tablist" className="mode-tabs" aria-label="추출 방식">
+        <div role="tablist" className="mode-tabs" aria-label="모드">
             {[
-                ["auto", "자동 추출", "그림에서 대표 색을 자동으로 뽑습니다"],
-                ["manual", "직접 설정", "색 개수와 가중치를 직접 정합니다"],
-                ...(includeStudy ? [["study", "채색 공부", "빛을 빼서 밑색을 봅니다"]] : []),
-            ].map(([id, label, hint]) => (
+                ["layers", "레이어 분해", "완성된 그림을 빛 레이어로 나눕니다", true],
+                ["auto", "자동 추출", "그림에서 대표 색을 자동으로 뽑습니다", false],
+                ["manual", "직접 설정", "색 개수와 가중치를 직접 정합니다", false],
+                ...(includeStudy ? [["study", "채색 공부", "빛을 빼서 밑색을 봅니다", false]] : []),
+            ].map(([id, label, hint, mark]) => (
                 <button
                     key={id}
                     type="button"
@@ -1424,7 +1432,7 @@ function App() {
                     aria-selected={mode === id}
                     title={hint}
                     onClick={() => switchMode(id)}
-                    className={`mode-tab${mode === id ? " mode-tab-active" : ""}`}
+                    className={`mode-tab${mark ? " mode-tab-mark" : ""}${mode === id ? " mode-tab-active" : ""}`}
                 >
                     {label}
                 </button>
@@ -1434,7 +1442,7 @@ function App() {
 
     const renderViewTabs = () => (
         <div className="button-row" role="tablist" aria-label="가운데 보기">
-            {mode === "study" ? (
+            {mode === "study" || mode === "layers" ? (
                 <button
                     type="button"
                     role="tab"
@@ -1442,7 +1450,7 @@ function App() {
                     className={`mode-tab${centerTab !== "svg" ? " mode-tab-active" : ""}`}
                     onClick={() => openCenter("recolor")}
                 >
-                    채색
+                    {mode === "layers" ? "분해" : "채색"}
                 </button>
             ) : (
                 <button
@@ -1491,7 +1499,7 @@ function App() {
             <header className="top">
                 <div className="top-brand">
                     <h1>컬러 팔레트</h1>
-                    <p>그림을 올리면 색을 뽑고, 그 색으로 다시 칠합니다.</p>
+                    <p>그림을 올리면 색을 뽑거나, 빛 레이어로 나눕니다.</p>
                 </div>
                 <div className="top-actions">
                     {renderModeTabs(true)}
@@ -1668,7 +1676,7 @@ function App() {
                             )}
                         </div>
                     )}
-                    {imageData && mode !== "study" && (
+                    {imageData && mode !== "study" && mode !== "layers" && (
                         <details className="scene-block">
                             <summary>색이 어디에 모였는지</summary>
                             <div className="scene-tabs" role="tablist" aria-label="색 분포 보기">
@@ -1760,20 +1768,24 @@ function App() {
                             <span className="region-index">2</span>
                             {centerTab === "svg"
                                 ? "선으로 따라 그린 그림"
-                                : mode === "study"
-                                  ? study.view === "glaze"
-                                      ? "빛·반사"
-                                      : "밑색"
-                                  : "다시 칠한 그림"}
+                                : mode === "layers"
+                                  ? "레이어"
+                                  : mode === "study"
+                                    ? study.view === "glaze"
+                                        ? "빛·반사"
+                                        : "밑색"
+                                    : "다시 칠한 그림"}
                         </h2>
                         <p>
                             {centerTab === "svg"
                                 ? "같은 그림을 면과 선으로 따라 그립니다."
-                                : mode === "study"
-                                  ? study.view === "glaze"
-                                      ? "흑백으로 값을 본 뒤, 어두운 쪽에 반사색, 밝은 쪽에 빛 색을 올립니다."
-                                      : "구분선 왼쪽은 원본, 오른쪽은 빛을 뺀 색입니다."
-                                  : "1번 그림에서 뽑은 색으로 다시 칠한 결과입니다."}
+                                : mode === "layers"
+                                  ? "레이어를 쌓으면 올린 그림에 가까워집니다."
+                                  : mode === "study"
+                                    ? study.view === "glaze"
+                                        ? "흑백으로 값을 본 뒤, 어두운 쪽에 반사색, 밝은 쪽에 빛 색을 올립니다."
+                                        : "구분선 왼쪽은 원본, 오른쪽은 빛을 뺀 색입니다."
+                                    : "1번 그림에서 뽑은 색으로 다시 칠한 결과입니다."}
                         </p>
                     </header>
                     <div hidden={centerTab === "svg"}>
@@ -1788,7 +1800,13 @@ function App() {
                             <div className="device">
                                 <div className="device-meta">
                                     {imageData && mode === "study" && <StudySummary study={study} />}
-                                    {imageData && mode !== "study" && clusters.length > 0 && (
+                                    {imageData && mode === "layers" && (
+                                        <div className="palette-summary">
+                                            <div className="stat-count">쌓인 레이어 {renderLayers.shown}/7</div>
+                                            {renderLayers.solo && <div className="stat-sub">한 레이어만 보고 있습니다.</div>}
+                                        </div>
+                                    )}
+                                    {imageData && mode !== "study" && mode !== "layers" && clusters.length > 0 && (
                                         <div className="palette-summary">
                                             <div className="stat-count">색 {clusters.length}개</div>
                                             {mode === "auto" && (
@@ -1806,7 +1824,8 @@ function App() {
                                             </div>
                                         )}
                                         {imageData && mode === "study" && <StudyStage study={study} />}
-                                        {imageData && mode !== "study" && (
+                                        {imageData && mode === "layers" && <RenderLayerStage model={renderLayers} />}
+                                        {imageData && mode !== "study" && mode !== "layers" && (
                                             <div className={`center-stage${isLandscape ? "" : " center-stage-portrait"}`}>
                                                 <div className="stage-image-container">
                                                     <div className="panel-image">
@@ -1821,7 +1840,7 @@ function App() {
                                             </div>
                                         )}
                                     </div>
-                                    {imageData && mode !== "study" && isLandscape && clusters.length > 0 && renderShareBar("bottom")}
+                                    {imageData && mode !== "study" && mode !== "layers" && isLandscape && clusters.length > 0 && renderShareBar("bottom")}
                                 </div>
                                 {!replayOpen && imageData && mode === "study" && centerTab !== "svg" && (
                                     <div className="device-controls">{tools}</div>
@@ -1855,20 +1874,22 @@ function App() {
                     )}
                 </main>
 
-                <aside className="panel panel-right" aria-label={centerTab === "svg" ? "그리는 순서" : mode === "study" ? "채색 공부" : "뽑은 색"}>
+                <aside className="panel panel-right" aria-label={centerTab === "svg" ? "그리는 순서" : mode === "layers" ? "레이어 분해" : mode === "study" ? "채색 공부" : "뽑은 색"}>
                     <header className="region-head">
                         <h2>
                             <span className="region-index">3</span>
-                            {centerTab === "svg" ? "그리는 순서" : mode === "study" ? "채색 공부" : "뽑은 색"}
+                            {centerTab === "svg" ? "그리는 순서" : mode === "layers" ? "레이어 분해" : mode === "study" ? "채색 공부" : "뽑은 색"}
                         </h2>
                         <p>
                             {centerTab === "svg"
                                 ? "재생 막대를 움직이거나 칸을 누르면 그 장면까지 그려집니다."
-                                : mode === "study"
-                                    ? study.view === "glaze"
-                                        ? "빛 색과 반사색을 고르고, 단계로 비교합니다."
-                                        : "빛을 빼서 그림의 밑색을 봅니다."
-                                    : "색 칸을 누르면 그 색만 보고, 체크는 보이기입니다."}
+                                : mode === "layers"
+                                    ? "레이어를 켜고 강도를 바꾸면 가운데 그림이 바뀝니다."
+                                    : mode === "study"
+                                        ? study.view === "glaze"
+                                            ? "빛 색과 반사색을 고르고, 단계로 비교합니다."
+                                            : "빛을 빼서 그림의 밑색을 봅니다."
+                                        : "색 칸을 누르면 그 색만 보고, 체크는 보이기입니다."}
                         </p>
                     </header>
                     {centerTab === "svg" ? (
@@ -1888,7 +1909,10 @@ function App() {
                                 </div>
                             )}
                             {imageData && mode === "study" && <StudyLayers study={study} />}
-                            {imageData && mode !== "study" && (
+                            {imageData && mode === "layers" && (
+                                <RenderLayerPanel model={renderLayers} fileName={imageInfo?.name} />
+                            )}
+                            {imageData && mode !== "study" && mode !== "layers" && (
                                 <>
                             {clusters.length > 0 && (
                             <div className="layer-dock-header">
