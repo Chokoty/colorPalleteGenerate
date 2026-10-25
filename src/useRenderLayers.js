@@ -1,5 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { RENDER_LAYER_IDS } from "./renderLayers.js";
+import {
+    createRenderView,
+    describeRenderView,
+    frameParams,
+    reduceRenderView,
+    renderViewKey,
+    restoreFullView,
+} from "./renderLayerView.js";
 import { STUDY_MAX_SIDE, downscaleRgba } from "./useColorStudy.js";
 
 function rgbaUrl(rgba, width, height) {
@@ -26,33 +34,25 @@ function downloadPng(rgba, width, height, filename) {
     }, "image/png");
 }
 
-const ALL = RENDER_LAYER_IDS.length;
+const COUNT = RENDER_LAYER_IDS.length;
 
 export function useRenderLayers(imageRef, uploadId, enabled) {
     const workerRef = useRef(null);
     const liveRef = useRef(0);
-    const plateRef = useRef(new Map());
-    const plateIdRef = useRef(0);
-    const paramsRef = useRef({ shown: ALL, visible: RENDER_LAYER_IDS.map(() => true), strength: RENDER_LAYER_IDS.map(() => 1), solo: null });
+    const sideRef = useRef(new Map());
+    const sideIdRef = useRef(0);
+    const [viewState, dispatch] = useReducer(reduceRenderView, undefined, createRenderView);
+    const viewRef = useRef(viewState);
+    viewRef.current = viewState;
     const [ready, setReady] = useState(false);
     const [error, setError] = useState("");
     const [frame, setFrame] = useState(null);
     const [thumbs, setThumbs] = useState([]);
-    const [shown, setShown] = useState(ALL);
-    const [playing, setPlaying] = useState(false);
-    const [speed, setSpeed] = useState(1);
-    const [visible, setVisible] = useState(() => RENDER_LAYER_IDS.map(() => true));
-    const [strength, setStrength] = useState(() => RENDER_LAYER_IDS.map(() => 100));
-    const [solo, setSolo] = useState(null);
+    const [grids, setGrids] = useState([]);
+    const [source, setSource] = useState(null);
     const [reduceMotion, setReduceMotion] = useState(false);
     const [workerEpoch, setWorkerEpoch] = useState(0);
-
-    paramsRef.current = {
-        shown,
-        visible,
-        strength: strength.map((value) => value / 100),
-        solo,
-    };
+    const viewKey = renderViewKey(viewState);
 
     useEffect(() => {
         const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -63,15 +63,13 @@ export function useRenderLayers(imageRef, uploadId, enabled) {
     }, []);
 
     useEffect(() => {
+        dispatch({ type: "reset" });
         setReady(false);
         setError("");
         setFrame(null);
         setThumbs([]);
-        setShown(ALL);
-        setPlaying(false);
-        setSolo(null);
-        setVisible(RENDER_LAYER_IDS.map(() => true));
-        setStrength(RENDER_LAYER_IDS.map(() => 100));
+        setGrids([]);
+        setSource(null);
     }, [uploadId]);
 
     useEffect(() => {
@@ -82,10 +80,10 @@ export function useRenderLayers(imageRef, uploadId, enabled) {
         worker.onmessage = (event) => {
             const data = event.data;
             if (!data) return;
-            if (data.type === "plate") {
-                const done = plateRef.current.get(data.id);
-                plateRef.current.delete(data.id);
-                if (done) done(data);
+            const side = sideRef.current.get(data.id);
+            if (side) {
+                sideRef.current.delete(data.id);
+                side(data);
                 return;
             }
             if (data.id !== liveRef.current) return;
@@ -94,21 +92,23 @@ export function useRenderLayers(imageRef, uploadId, enabled) {
                 setReady(false);
                 return;
             }
+            if (data.type === "decompose") {
+                const urls = (items) =>
+                    (items || []).map((item) => ({
+                        id: item.id,
+                        url: rgbaUrl(new Uint8ClampedArray(item.rgba), item.width, item.height),
+                    }));
+                if (data.thumbs) setThumbs(urls(data.thumbs));
+                if (data.grids) setGrids(urls(data.grids));
+                setReady(true);
+            }
+            if (data.key && data.key !== renderViewKey(viewRef.current)) return;
             setError("");
             setFrame({
                 rgba: new Uint8ClampedArray(data.rgba),
                 width: data.width,
                 height: data.height,
             });
-            if (data.type === "decompose" && data.thumbs) {
-                setThumbs(
-                    data.thumbs.map((thumb) => ({
-                        id: thumb.id,
-                        url: rgbaUrl(new Uint8ClampedArray(thumb.rgba), thumb.width, thumb.height),
-                    }))
-                );
-                setReady(true);
-            }
         };
         worker.onerror = () => setError("레이어로 나누지 못했습니다.");
         return () => {
@@ -123,22 +123,25 @@ export function useRenderLayers(imageRef, uploadId, enabled) {
         const image = imageRef.current;
         if (!worker || !image?.data) return undefined;
         const fitted = downscaleRgba(image.data, image.width, image.height, STUDY_MAX_SIDE);
-        const id = ++liveRef.current;
         const copy = new Uint8ClampedArray(fitted.data);
-        const params = paramsRef.current;
+        setSource({
+            rgba: new Uint8ClampedArray(fitted.data),
+            width: fitted.width,
+            height: fitted.height,
+        });
+        const id = ++liveRef.current;
+        const state = viewRef.current;
         const timer = setTimeout(() => {
             if (workerRef.current !== worker) return;
             worker.postMessage(
                 {
                     id,
                     type: "decompose",
+                    key: renderViewKey(state),
                     rgba: copy.buffer,
                     width: fitted.width,
                     height: fitted.height,
-                    shown: params.shown,
-                    visible: params.visible,
-                    strength: params.strength,
-                    solo: params.solo,
+                    ...frameParams(state),
                 },
                 [copy.buffer]
             );
@@ -151,96 +154,82 @@ export function useRenderLayers(imageRef, uploadId, enabled) {
         const worker = workerRef.current;
         if (!worker) return undefined;
         const id = ++liveRef.current;
+        const state = viewRef.current;
         const timer = setTimeout(() => {
             if (workerRef.current !== worker) return;
             worker.postMessage({
                 id,
                 type: "composite",
-                shown,
-                visible,
-                strength: strength.map((value) => value / 100),
-                solo,
+                key: renderViewKey(state),
+                ...frameParams(state),
             });
         }, 32);
         return () => clearTimeout(timer);
-    }, [enabled, ready, shown, visible, strength, solo]);
+    }, [enabled, ready, viewKey]);
 
     useEffect(() => {
-        if (!playing || !ready) return undefined;
-        if (reduceMotion) {
-            setShown(ALL);
-            setPlaying(false);
+        if (!viewState.playing || !ready) return undefined;
+        if (reduceMotion || viewState.view !== "stack" || viewState.shown >= COUNT) {
+            dispatch(reduceMotion ? { type: "seek", shown: COUNT } : { type: "tick" });
             return undefined;
         }
-        if (shown >= ALL) {
-            setPlaying(false);
-            return undefined;
-        }
-        const wait = shown === 0 ? 40 : Math.max(90, Math.round(700 / speed));
-        const timer = setTimeout(() => setShown((value) => value + 1), wait);
+        const wait = viewState.shown === 0 ? 40 : Math.max(90, Math.round(700 / viewState.speed));
+        const timer = setTimeout(() => dispatch({ type: "tick" }), wait);
         return () => clearTimeout(timer);
-    }, [playing, shown, speed, ready, reduceMotion]);
+    }, [viewState.playing, viewState.shown, viewState.speed, viewState.view, ready, reduceMotion]);
 
-    const togglePlay = () => {
-        if (!ready) return;
-        if (playing) {
-            setPlaying(false);
-            return;
-        }
-        setSolo(null);
-        if (reduceMotion) {
-            setShown(ALL);
-            setPlaying(false);
-            return;
-        }
-        if (shown >= ALL) setShown(0);
-        setPlaying(true);
-    };
-
-    const seek = (value) => {
-        setPlaying(false);
-        setSolo(null);
-        setShown(Math.max(0, Math.min(ALL, value)));
-    };
-
-    const toggleSolo = (id) => {
-        setPlaying(false);
-        setSolo((current) => (current === id ? null : id));
+    const ask = (message, done) => {
+        const worker = workerRef.current;
+        if (!worker || !ready) return;
+        const id = -(++sideIdRef.current);
+        sideRef.current.set(id, done);
+        worker.postMessage({ ...message, id });
     };
 
     const exportLayer = (id, filename) => {
-        const worker = workerRef.current;
-        if (!worker || !ready) return;
-        const request = ++plateIdRef.current;
-        plateRef.current.set(request, (data) => {
+        ask({ type: "plate", layerId: id }, (data) => {
             if (!data.ok || !data.rgba) return;
             downloadPng(new Uint8ClampedArray(data.rgba), data.width, data.height, filename);
         });
-        worker.postMessage({ id: request, type: "plate", layerId: id });
     };
 
     const exportCombined = (filename) => {
-        if (!frame) return;
-        downloadPng(frame.rgba, frame.width, frame.height, filename);
+        const state = viewRef.current;
+        if (state.view !== "solo" && frame) {
+            downloadPng(frame.rgba, frame.width, frame.height, filename);
+            return;
+        }
+        const stacked = restoreFullView({ ...state, view: "stack" });
+        stacked.visible = state.visible;
+        stacked.strength = state.strength;
+        ask({ type: "composite", key: "export", ...frameParams({ ...stacked, view: "stack", shown: COUNT }) }, (data) => {
+            if (!data.ok || !data.rgba) return;
+            downloadPng(new Uint8ClampedArray(data.rgba), data.width, data.height, filename);
+        });
     };
 
     return {
         ready,
         error,
         frame,
+        source,
+        grids,
         thumbs,
-        shown,
-        playing,
-        speed,
-        setSpeed,
-        visible,
-        setVisible,
-        strength,
-        setStrength,
-        solo,
-        togglePlay,
-        seek,
-        toggleSolo,
+        view: viewState.view,
+        shown: viewState.shown,
+        soloIndex: viewState.soloIndex,
+        visible: viewState.visible,
+        strength: viewState.strength,
+        playing: viewState.playing,
+        speed: viewState.speed,
+        status: describeRenderView(viewState),
+        dispatch,
+        setSpeed: (speed) => dispatch({ type: "speed", speed }),
+        togglePlay: () => {
+            if (!ready) return;
+            dispatch({ type: "play", reduceMotion });
+        },
+        seek: (shown) => dispatch({ type: "seek", shown }),
         exportLayer,
         exportCombined,
     };

@@ -23,6 +23,17 @@ export const SAMPLES = [
         profile: "https://pixabay.com/users/sushi_musume_jk-42518915/",
         aiGenerated: true,
     },
+    {
+        id: "metal",
+        file: "metal.webp",
+        alt: "금속 우리 안의 크롬 구",
+        author: "TheDigitalArtist",
+        profile: "https://pixabay.com/users/thedigitalartist-202249/",
+        page: "https://pixabay.com/illustrations/chrome-3d-render-metal-silver-649761/",
+        license: "Pixabay Content License",
+        aiGenerated: false,
+    },
 ];
 
 export const DEFAULT_SAMPLE = SAMPLES[0];
+export const LAYER_SAMPLE = SAMPLES.find((sample) => sample.id === "metal");

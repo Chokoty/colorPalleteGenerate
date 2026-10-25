@@ -8,6 +8,12 @@ import {
 
 let decomp = null;
 
+function copyPreview(plate, maxSide) {
+    const small = downsampleRgba(plate, decomp.width, decomp.height, maxSide);
+    const rgba = small.rgba.buffer === plate.buffer ? new Uint8ClampedArray(small.rgba) : small.rgba;
+    return { rgba, width: small.width, height: small.height };
+}
+
 function frameMessage(id, type, rgba) {
     return {
         id,
@@ -36,27 +42,27 @@ self.onmessage = (event) => {
                       strength: message.strength,
                   });
             const thumbs = [];
+            const grids = [];
             const transfers = [merged.buffer];
             for (const id of RENDER_LAYER_IDS) {
                 const plate = layerPlate(decomp, id);
-                const small = downsampleRgba(plate, decomp.width, decomp.height, 72);
-                thumbs.push({
-                    id,
-                    width: small.width,
-                    height: small.height,
-                    rgba: small.rgba.buffer,
-                });
-                if (small.rgba.buffer !== plate.buffer) transfers.push(small.rgba.buffer);
+                const thumb = copyPreview(plate, 72);
+                const grid = copyPreview(plate, 320);
+                thumbs.push({ id, width: thumb.width, height: thumb.height, rgba: thumb.rgba.buffer });
+                grids.push({ id, width: grid.width, height: grid.height, rgba: grid.rgba.buffer });
+                transfers.push(thumb.rgba.buffer, grid.rgba.buffer);
             }
             self.postMessage(
                 {
                     id: message.id,
                     type: "decompose",
                     ok: true,
+                    key: message.key,
                     width: decomp.width,
                     height: decomp.height,
                     rgba: merged.buffer,
                     thumbs,
+                    grids,
                 },
                 transfers
             );
@@ -71,7 +77,7 @@ self.onmessage = (event) => {
         const rgba = message.solo
             ? layerPlate(decomp, message.solo)
             : compositeRenderLayers(decomp, message);
-        self.postMessage(frameMessage(message.id, "composite", rgba), [rgba.buffer]);
+        self.postMessage({ ...frameMessage(message.id, "composite", rgba), key: message.key }, [rgba.buffer]);
     } catch (error) {
         self.postMessage({
             id: message.id,

@@ -14,7 +14,7 @@ import { extractLineArt } from "./lineartModel";
 import { StudyControls, StudyLayers, StudyStage, StudySummary, StudyTools } from "./ColorStudy";
 import { RenderLayerPanel, RenderLayerStage } from "./RenderLayers";
 import { StartGuide } from "./StartGuide";
-import { DEFAULT_SAMPLE, SAMPLES } from "./samples";
+import { DEFAULT_SAMPLE, LAYER_SAMPLE, SAMPLES } from "./samples";
 import SvgPanel from "./SvgPanel";
 import { useColorStudy } from "./useColorStudy";
 import { useRenderLayers } from "./useRenderLayers";
@@ -479,6 +479,8 @@ function App() {
     const [svgDock, setSvgDock] = useState(null);
     const [studyOpen, setStudyOpen] = useState(true);
     const [activeSampleId, setActiveSampleId] = useState(null);
+    const activeSampleRef = useRef(activeSampleId);
+    activeSampleRef.current = activeSampleId;
     const loadSerialRef = useRef(0);
     const loadImageFileRef = useRef(null);
 
@@ -811,8 +813,17 @@ function App() {
         if (nextMode === "study") setStudyOpen(true);
         if (nextMode === "layers") setCenterTab("recolor");
         if (nextMode === modeRef.current) return;
+        const previous = modeRef.current;
         modeRef.current = nextMode;
         setMode(nextMode);
+        if (nextMode === "layers" && activeSampleRef.current === DEFAULT_SAMPLE.id && LAYER_SAMPLE) {
+            openSample(LAYER_SAMPLE);
+            return;
+        }
+        if (previous === "layers" && activeSampleRef.current === LAYER_SAMPLE?.id) {
+            openSample(DEFAULT_SAMPLE);
+            return;
+        }
         if (nextMode === "study" || nextMode === "layers") return;
         if (!imageRef.current) {
             setClusterCount(nextMode === "manual" ? manualCountRef.current : clusterCount);
@@ -1780,7 +1791,7 @@ function App() {
                             {centerTab === "svg"
                                 ? "같은 그림을 면과 선으로 따라 그립니다."
                                 : mode === "layers"
-                                  ? "레이어를 쌓으면 올린 그림에 가까워집니다."
+                                  ? "쌓기, 단독, 격자, 비교로 나눈 레이어를 봅니다."
                                   : mode === "study"
                                     ? study.view === "glaze"
                                         ? "흑백으로 값을 본 뒤, 어두운 쪽에 반사색, 밝은 쪽에 빛 색을 올립니다."
@@ -1802,8 +1813,9 @@ function App() {
                                     {imageData && mode === "study" && <StudySummary study={study} />}
                                     {imageData && mode === "layers" && (
                                         <div className="palette-summary">
-                                            <div className="stat-count">쌓인 레이어 {renderLayers.shown}/7</div>
-                                            {renderLayers.solo && <div className="stat-sub">한 레이어만 보고 있습니다.</div>}
+                                            <div className="stat-count" data-render-status={renderLayers.status}>
+                                                {renderLayers.status}
+                                            </div>
                                         </div>
                                     )}
                                     {imageData && mode !== "study" && mode !== "layers" && clusters.length > 0 && (
@@ -1865,11 +1877,21 @@ function App() {
                             Image by{" "}
                             <a href={activeSample.profile} target="_blank" rel="noreferrer">
                                 {activeSample.author}
-                            </a>{" "}
+                            </a>
+                            {activeSample.page ? (
+                                <>
+                                    {" "}
+                                    ·{" "}
+                                    <a href={activeSample.page} target="_blank" rel="noreferrer">
+                                        원본
+                                    </a>
+                                </>
+                            ) : null}{" "}
                             from{" "}
                             <a href="https://pixabay.com/" target="_blank" rel="noreferrer">
                                 Pixabay
                             </a>
+                            {activeSample.license ? ` · ${activeSample.license}` : ""}
                         </p>
                     )}
                 </main>
@@ -1884,7 +1906,7 @@ function App() {
                             {centerTab === "svg"
                                 ? "재생 막대를 움직이거나 칸을 누르면 그 장면까지 그려집니다."
                                 : mode === "layers"
-                                    ? "레이어를 켜고 강도를 바꾸면 가운데 그림이 바뀝니다."
+                                    ? "쌓기와 단독은 다른 보기입니다. 체크와 강도는 쌓는 양이고, 격자는 일곱 장을 한눈에 보여 줍니다."
                                     : mode === "study"
                                         ? study.view === "glaze"
                                             ? "빛 색과 반사색을 고르고, 단계로 비교합니다."
@@ -1910,7 +1932,7 @@ function App() {
                             )}
                             {imageData && mode === "study" && <StudyLayers study={study} />}
                             {imageData && mode === "layers" && (
-                                <RenderLayerPanel model={renderLayers} fileName={imageInfo?.name} />
+                                <RenderLayerPanel model={renderLayers} fileName={imageInfo?.name} sample={activeSample} />
                             )}
                             {imageData && mode !== "study" && mode !== "layers" && (
                                 <>
