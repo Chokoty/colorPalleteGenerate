@@ -1758,13 +1758,21 @@ function App() {
                     <header className="region-head">
                         <h2>
                             <span className="region-index">2</span>
-                            {centerTab === "svg" ? "선으로 따라 그린 그림" : mode === "study" ? "밑색" : "다시 칠한 그림"}
+                            {centerTab === "svg"
+                                ? "선으로 따라 그린 그림"
+                                : mode === "study"
+                                  ? study.view === "glaze"
+                                      ? "빛·반사"
+                                      : "밑색"
+                                  : "다시 칠한 그림"}
                         </h2>
                         <p>
                             {centerTab === "svg"
                                 ? "같은 그림을 면과 선으로 따라 그립니다."
                                 : mode === "study"
-                                  ? "구분선 왼쪽은 원본, 오른쪽은 빛을 뺀 색입니다."
+                                  ? study.view === "glaze"
+                                      ? "흑백으로 값을 본 뒤, 어두운 쪽에 반사색, 밝은 쪽에 빛 색을 올립니다."
+                                      : "구분선 왼쪽은 원본, 오른쪽은 빛을 뺀 색입니다."
                                   : "1번 그림에서 뽑은 색으로 다시 칠한 결과입니다."}
                         </p>
                     </header>
@@ -1857,7 +1865,9 @@ function App() {
                             {centerTab === "svg"
                                 ? "재생 막대를 움직이거나 칸을 누르면 그 장면까지 그려집니다."
                                 : mode === "study"
-                                    ? "빛을 빼서 그림의 밑색을 봅니다."
+                                    ? study.view === "glaze"
+                                        ? "빛 색과 반사색을 고르고, 단계로 비교합니다."
+                                        : "빛을 빼서 그림의 밑색을 봅니다."
                                     : "색 칸을 누르면 그 색만 보고, 체크는 보이기입니다."}
                         </p>
                     </header>

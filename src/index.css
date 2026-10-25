@@ -896,6 +896,10 @@ input[type="checkbox"] {
     background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
 
+.stage-canvas.is-glaze {
+    cursor: crosshair;
+}
+
 .stage-canvas,
 .original-image {
     display: block;
@@ -1456,6 +1460,7 @@ input[type="checkbox"] {
 
 .study-controls label,
 .study-decompose label,
+.study-tools label,
 .study-compare {
     display: flex;
     flex-direction: column;
@@ -1476,7 +1481,8 @@ input[type="checkbox"] {
 
 .study-compare input[type="range"],
 .study-controls input[type="range"],
-.study-decompose input[type="range"] {
+.study-decompose input[type="range"],
+.study-tools input[type="range"] {
     width: 100%;
 }
 
