@@ -45,6 +45,16 @@ test("render layers follow the paint order and sum back to the picture", () => {
         return [200 + wobble, 170 + wobble, 80, 255];
     });
     const decomp = decomposeRenderLayers(rgba, width, height, { broad: 4, mid: 1 });
+    assert.deepEqual(decomp.layers.map((item) => item.id), [
+        "base",
+        "light",
+        "shadow",
+        "texture",
+        "ao",
+        "glare",
+        "reflection",
+        "ambient",
+    ]);
     assert.deepEqual(
         decomp.layers.map((item) => item.id),
         RENDER_LAYER_IDS
@@ -74,21 +84,54 @@ test("render layers follow the paint order and sum back to the picture", () => {
     assert.equal(merged[3], 0);
     assert.equal(merged[(2 * width + 2) * 4 + 3], 0);
 
-    const lightOnly = compositeRenderLayers(decomp, { shown: 1 });
-    const lightVisible = compositeRenderLayers(decomp, {
-        visible: [true, false, false, false, false, false, false],
+    const baseOnly = compositeRenderLayers(decomp, { shown: 1 });
+    const baseVisible = compositeRenderLayers(decomp, {
+        visible: RENDER_LAYER_IDS.map((id) => id === "base"),
     });
-    assert.deepEqual(lightOnly, lightVisible);
-    const lightGap = rgbMeanAbsError(rgba, lightOnly);
-    assert.ok(lightGap.mean > error.mean + 1);
+    assert.deepEqual(baseOnly, baseVisible);
+    const baseGap = rgbMeanAbsError(rgba, baseOnly);
+    assert.ok(baseGap.mean > error.mean + 1);
 
+    const textureAt = RENDER_LAYER_IDS.indexOf("texture");
     const dropped = compositeRenderLayers(decomp, {
-        strength: [1, 1, 0, 1, 1, 1, 1],
+        strength: RENDER_LAYER_IDS.map((id, index) => (index === textureAt ? 0 : 1)),
     });
     const hidden = compositeRenderLayers(decomp, {
-        visible: [true, true, false, true, true, true, true],
+        visible: RENDER_LAYER_IDS.map((id, index) => index !== textureAt),
     });
     assert.deepEqual(dropped, hidden);
+});
+
+test("base color is the flat local color under the light", () => {
+    const width = 48;
+    const height = 24;
+    const rgba = fill(width, height, (x, y) => {
+        if (x === 8 && y === 8) return [18, 28, 150];
+        if (x === 36 && y === 8) return [250, 220, 40];
+        return x < width / 2 ? [170, 36, 42] : [150, 150, 150];
+    });
+    const decomp = decomposeRenderLayers(rgba, width, height, { broad: 2, mid: 1 });
+    const base = layer(decomp, "base");
+    const light = layer(decomp, "light");
+    const reflection = layer(decomp, "reflection");
+    const ambient = layer(decomp, "ambient");
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < width * height; i++) {
+        if (!Number.isFinite(base.l[i])) continue;
+        min = Math.min(min, base.l[i]);
+        max = Math.max(max, base.l[i]);
+    }
+    assert.ok(max - min < 0.45, `base lightness range ${max - min}`);
+    const red = 12 * width + 8;
+    const gray = 12 * width + 40;
+    assert.ok(base.a[red] > base.a[gray] + 0.02, `base chroma ${base.a[red]} vs ${base.a[gray]}`);
+    assert.ok(Math.abs(reflection.b[red]) < 0.01, `flat red reflection ${reflection.b[red]}`);
+    const cool = 8 * width + 8;
+    const warm = 8 * width + 36;
+    assert.ok(reflection.b[cool] < -0.01, `cool reflection ${reflection.b[cool]}`);
+    assert.ok(ambient.b[warm] > 0.01, `warm ambient ${ambient.b[warm]}`);
+    assert.ok(light.l[warm] > light.l[cool]);
 });
 
 test("a white speck on gray lands in glare", () => {
@@ -121,36 +164,25 @@ test("a dark crease on an edge lands in AO", () => {
 });
 
 test("cool dark color becomes reflection and warm light becomes ambient", () => {
-    const width = 64;
+    const width = 48;
     const height = 32;
     const rgba = fill(width, height, (x, y) => {
-        if (x === 50 && y === 8) return [80, 140, 255];
-        return x < width / 2 ? [24, 36, 140] : [240, 200, 60];
+        if (x === 12 && y === 16) return [16, 24, 160];
+        if (x === 34 && y === 16) return [255, 230, 80];
+        if (x === 40 && y === 8) return [80, 140, 255];
+        return [140, 140, 140];
     });
     const decomp = decomposeRenderLayers(rgba, width, height, { broad: 3, mid: 1 });
     const reflection = layer(decomp, "reflection").b;
     const ambient = layer(decomp, "ambient").b;
-    const mean = (plane, x0, x1) => {
-        let sum = 0;
-        let n = 0;
-        for (let y = 0; y < height; y++) {
-            for (let x = x0; x < x1; x++) {
-                if (x === 50 && y === 8) continue;
-                sum += plane[y * width + x];
-                n += 1;
-            }
-        }
-        return sum / n;
-    };
-    const leftReflection = mean(reflection, 0, width / 2);
-    const rightReflection = mean(reflection, width / 2, width);
-    const leftAmbient = mean(ambient, 0, width / 2);
-    const rightAmbient = mean(ambient, width / 2, width);
-    assert.ok(leftReflection < -0.02, `left reflection ${leftReflection}`);
-    assert.ok(leftReflection < rightReflection);
-    assert.ok(rightAmbient > 0.02, `right ambient ${rightAmbient}`);
-    assert.ok(rightAmbient > leftAmbient);
-    const brightBlue = 8 * width + 50;
+    const cool = 16 * width + 12;
+    const warm = 16 * width + 34;
+    const flat = 16 * width + 4;
+    assert.ok(reflection[cool] < -0.02, `cool reflection ${reflection[cool]}`);
+    assert.ok(reflection[cool] < reflection[flat]);
+    assert.ok(ambient[warm] > 0.02, `warm ambient ${ambient[warm]}`);
+    assert.ok(ambient[warm] > ambient[flat]);
+    const brightBlue = 8 * width + 40;
     assert.ok(Math.abs(reflection[brightBlue]) < 1e-6);
 });
 

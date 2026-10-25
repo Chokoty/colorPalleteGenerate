@@ -26,34 +26,34 @@ function paint(width, height, pixel) {
 
 test("turning texture off and on does not change the other layers or the view", () => {
     let state = createRenderView();
-    state = reduceRenderView(state, { type: "visible", index: 2, on: false });
+    state = reduceRenderView(state, { type: "visible", index: 3, on: false });
     assert.equal(state.view, "stack");
-    assert.equal(state.shown, 7);
+    assert.equal(state.shown, 8);
     assert.equal(state.soloIndex, 0);
-    assert.deepEqual(state.visible, [true, true, false, true, true, true, true]);
-    assert.equal(describeRenderView(state), "쌓인 레이어 7/7 · 1개 꺼짐");
+    assert.deepEqual(state.visible, [true, true, true, false, true, true, true, true]);
+    assert.equal(describeRenderView(state), "쌓인 레이어 8/8 · 1개 꺼짐");
     assert.equal(describeRenderView(state).includes("한 레이어"), false);
 
-    state = reduceRenderView(state, { type: "visible", index: 2, on: true });
-    assert.deepEqual(state.visible, [true, true, true, true, true, true, true]);
-    assert.deepEqual(state.strength, [100, 100, 100, 100, 100, 100, 100]);
-    assert.equal(describeRenderView(state), "쌓인 레이어 7/7");
+    state = reduceRenderView(state, { type: "visible", index: 3, on: true });
+    assert.deepEqual(state.visible, [true, true, true, true, true, true, true, true]);
+    assert.deepEqual(state.strength, [100, 100, 100, 100, 100, 100, 100, 100]);
+    assert.equal(describeRenderView(state), "쌓인 레이어 8/8");
 });
 
 test("stack, solo, grid, and compare each have one status line", () => {
     let state = createRenderView();
-    state = reduceRenderView(state, { type: "pick", index: 2 });
+    state = reduceRenderView(state, { type: "pick", index: 3 });
     assert.equal(state.view, "stack");
-    assert.equal(state.shown, 3);
-    assert.equal(describeRenderView(state), "쌓인 레이어 3/7");
+    assert.equal(state.shown, 4);
+    assert.equal(describeRenderView(state), "쌓인 레이어 4/8");
 
     state = reduceRenderView(state, { type: "view", view: "solo" });
-    state = reduceRenderView(state, { type: "pick", index: 2 });
+    state = reduceRenderView(state, { type: "pick", index: 3 });
     assert.equal(describeRenderView(state), "텍스처만 보고 있습니다");
     assert.equal(describeRenderView(state).includes("쌓인 레이어"), false);
 
     state = reduceRenderView(state, { type: "view", view: "grid" });
-    assert.equal(describeRenderView(state), "일곱 레이어를 나란히 보고 있습니다");
+    assert.equal(describeRenderView(state), "여덟 레이어를 나란히 보고 있습니다");
     state = reduceRenderView(state, { type: "view", view: "compare" });
     assert.equal(describeRenderView(state), "원본과 쌓은 결과를 비교하고 있습니다");
 });
@@ -75,19 +75,19 @@ test("random visibility and strength still rebuild the picture at full strength"
         return seed / 2147483647;
     };
     for (let step = 0; step < 24; step++) {
-        const index = Math.floor(next() * 7);
+        const index = Math.floor(next() * 8);
         if (next() < 0.5) state = reduceRenderView(state, { type: "visible", index, on: next() < 0.5 });
         else state = reduceRenderView(state, { type: "strength", index, value: Math.floor(next() * 101) });
         if (next() < 0.3) state = reduceRenderView(state, { type: "view", view: ["stack", "solo", "grid", "compare"][index % 4] });
         if (next() < 0.3) state = reduceRenderView(state, { type: "pick", index });
     }
     state = restoreFullView(state);
-    assert.equal(describeRenderView(state), "쌓인 레이어 7/7");
+    assert.equal(describeRenderView(state), "쌓인 레이어 8/8");
     assert.equal(state.visible.every(Boolean), true);
     assert.equal(state.strength.every((value) => value === 100), true);
     const params = frameParams(state);
     assert.equal(params.solo, null);
-    assert.equal(params.shown, 7);
+    assert.equal(params.shown, 8);
     const rebuilt = compositeRenderLayers(decomp, params);
     assert.deepEqual(rebuilt, full);
     assert.ok(rgbMeanAbsError(rgba, rebuilt).mean < 2);

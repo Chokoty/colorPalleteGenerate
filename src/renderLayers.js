@@ -1,8 +1,8 @@
-// Estimate a finished picture as the render layers Kate Coral stacks:
-// Light, Shadow, Texture, AO, Glare, then cool Reflection and warm Ambient.
+// Estimate a finished picture as paint layers, bottom to top:
+// base color, light, shadow, texture, AO, glare, reflection, ambient.
 // Lightness splits by two blurs so the pieces telescope back to OKLab L.
-// Chroma splits by how far a pixel sits from the picture's own average
-// color: cool deviation on the dark side, warm deviation on the lit side.
+// The base keeps the local color. Cool deviation from that color on the
+// dark side is reflection, and warm deviation on the lit side is ambient.
 // This is a heuristic, not an inverse render. At strength 1 the sum of the
 // OKLab planes is the source OKLab, so the RGB error is the round trip.
 
@@ -10,6 +10,7 @@ import { clamp01, clampByte, oklabToSrgb, srgbToOklab } from "./colorStudy.js";
 import { lightWeight, shadowWeight } from "./lightReflection.js";
 
 export const RENDER_LAYERS = [
+    { id: "base", en: "BASE", name: "기본컬러", hint: "물체의 색" },
     { id: "light", en: "LIGHT", name: "라이트", hint: "큰 명암" },
     { id: "shadow", en: "SHADOW", name: "그림자", hint: "부드러운 부피" },
     { id: "texture", en: "TEXTURE", name: "텍스처", hint: "잔무늬" },
@@ -25,6 +26,9 @@ const GLARE_L0 = 0.75;
 const GLARE_L1 = 0.92;
 const AO_G0 = 0.015;
 const AO_G1 = 0.08;
+// How far the base lightness moves from the broad form toward one flat value.
+// The rest of that form is the light layer, so black and white objects still differ.
+const BASE_FLATTEN = 0.7;
 
 export function defaultRadii(width, height) {
     const side = Math.min(width, height);
@@ -133,8 +137,7 @@ export function decomposeRenderLayers(rgba, width, height, radii) {
     const L = new Float32Array(count);
     const A = new Float32Array(count);
     const B = new Float32Array(count);
-    let sumA = 0;
-    let sumB = 0;
+    let sumL = 0;
     let opaque = 0;
     for (let i = 0; i < count; i++) {
         const o = i * 4;
@@ -150,19 +153,20 @@ export function decomposeRenderLayers(rgba, width, height, radii) {
         L[i] = lab[0];
         A[i] = lab[1];
         B[i] = lab[2];
-        sumA += lab[1];
-        sumB += lab[2];
+        sumL += lab[0];
         opaque += 1;
     }
-    const meanA = opaque ? sumA / opaque : 0;
-    const meanB = opaque ? sumB / opaque : 0;
+    const meanL = opaque ? sumL / opaque : 0.5;
     const Lb = boxBlur(L, width, height, broad);
     const Lm = boxBlur(L, width, height, mid);
+    const Ab = boxBlur(A, width, height, broad);
+    const Bb = boxBlur(B, width, height, broad);
     const grad = gradientMag(Lm, width, height);
 
+    const baseL = plane(count);
+    const baseA = plane(count);
+    const baseB = plane(count);
     const lightL = plane(count);
-    const lightA = plane(count);
-    const lightB = plane(count);
     const shadowL = plane(count);
     const textureL = plane(count);
     const aoL = plane(count);
@@ -177,7 +181,9 @@ export function decomposeRenderLayers(rgba, width, height, radii) {
         const lb = Number.isFinite(Lb[i]) ? Lb[i] : L[i];
         const lm = Number.isFinite(Lm[i]) ? Lm[i] : L[i];
         const value = L[i];
-        lightL[i] = Math.max(lb, lm);
+        const localL = meanL * BASE_FLATTEN + lb * (1 - BASE_FLATTEN);
+        baseL[i] = localL;
+        lightL[i] = Math.max(lb, lm) - localL;
         shadowL[i] = Math.min(0, lm - lb);
         const detail = value - lm;
         const positive = detail > 0 ? detail : 0;
@@ -187,8 +193,10 @@ export function decomposeRenderLayers(rgba, width, height, radii) {
         aoL[i] = -ao;
         textureL[i] = detail - glare + ao;
 
-        const dA = A[i] - meanA;
-        const dB = B[i] - meanB;
+        const ab = Number.isFinite(Ab[i]) ? Ab[i] : A[i];
+        const bb = Number.isFinite(Bb[i]) ? Bb[i] : B[i];
+        const dA = A[i] - ab;
+        const dB = B[i] - bb;
         let rA = 0;
         let rB = 0;
         let mA = 0;
@@ -206,8 +214,8 @@ export function decomposeRenderLayers(rgba, width, height, radii) {
         reflectionB[i] = rB;
         ambientA[i] = mA;
         ambientB[i] = mB;
-        lightA[i] = A[i] - rA - mA;
-        lightB[i] = B[i] - rB - mB;
+        baseA[i] = A[i] - rA - mA;
+        baseB[i] = B[i] - rB - mB;
     }
 
     return {
@@ -215,7 +223,8 @@ export function decomposeRenderLayers(rgba, width, height, radii) {
         height,
         alpha,
         layers: [
-            { id: "light", l: lightL, a: lightA, b: lightB },
+            { id: "base", l: baseL, a: baseA, b: baseB },
+            { id: "light", l: lightL },
             { id: "shadow", l: shadowL },
             { id: "texture", l: textureL },
             { id: "ao", l: aoL },
@@ -279,7 +288,11 @@ export function layerPlate(decomp, id) {
         let L = l;
         let A = a;
         let B = b;
-        if (id === "shadow" || id === "ao") {
+        if (id === "light") {
+            L = clamp01(0.5 + l);
+            A = 0;
+            B = 0;
+        } else if (id === "shadow" || id === "ao") {
             L = clamp01(1 + l);
             A = 0;
             B = 0;

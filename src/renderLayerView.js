@@ -84,10 +84,10 @@ export function reduceRenderView(state, action) {
 
 export function describeRenderView(state) {
     if (state.view === "solo") return `${RENDER_LAYERS[state.soloIndex].name}만 보고 있습니다`;
-    if (state.view === "grid") return "일곱 레이어를 나란히 보고 있습니다";
+    if (state.view === "grid") return "여덟 레이어를 나란히 보고 있습니다";
     if (state.view === "compare") return "원본과 쌓은 결과를 비교하고 있습니다";
     const hidden = state.visible.slice(0, state.shown).filter((on) => !on).length;
-    return hidden ? `쌓인 레이어 ${state.shown}/7 · ${hidden}개 꺼짐` : `쌓인 레이어 ${state.shown}/7`;
+    return hidden ? `쌓인 레이어 ${state.shown}/${COUNT} · ${hidden}개 꺼짐` : `쌓인 레이어 ${state.shown}/${COUNT}`;
 }
 
 export function frameParams(state) {

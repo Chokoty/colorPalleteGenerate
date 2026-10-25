@@ -112,7 +112,7 @@ test("texture toggles, random edits, and view modes keep one status and restore 
         await waitFor(async () => (await evaluate("window.__layer.name()")).includes("default.webp"), 20000, "default sample");
         assert.equal(await evaluate('window.__layer.clickText("button[role=tab]", "레이어 분해")'), true);
         await waitFor(async () => (await evaluate("window.__layer.name()")).includes("metal.webp"), 20000, "metal sample");
-        await waitFor(async () => (await evaluate("window.__layer.status()")) === "쌓인 레이어 7/7", 20000, "stack status");
+        await waitFor(async () => (await evaluate("window.__layer.status()")) === "쌓인 레이어 8/8", 20000, "stack status");
         const baseline = await waitFor(async () => {
             const hash = await evaluate('window.__layer.stableHash("레이어를 쌓은 그림")');
             return hash || null;
@@ -123,12 +123,12 @@ test("texture toggles, random edits, and view modes keep one status and restore 
         assert.equal(await evaluate('window.__layer.clickBox("텍스처 표시")'), true);
         const hidden = await waitFor(async () => {
             const state = await evaluate("window.__layer.snapshot()");
-            return state.status === "쌓인 레이어 7/7 · 1개 꺼짐" && state.hash && state.hash !== baseline ? state : null;
+            return state.status === "쌓인 레이어 8/8 · 1개 꺼짐" && state.hash && state.hash !== baseline ? state : null;
         }, 30000, "texture hidden");
         assert.equal(hidden.status.includes("한 레이어"), false);
         assert.equal(hidden.boxes.find((box) => box.label === "앰비언트 표시").on, true);
         assert.equal(hidden.boxes.find((box) => box.label === "텍스처 표시").on, false);
-        assert.equal(hidden.boxes.filter((box) => box.on).length, 6);
+        assert.equal(hidden.boxes.filter((box) => box.on).length, 7);
 
         assert.equal(await evaluate('window.__layer.clickBox("텍스처 표시")'), true);
         await sleep(30);
@@ -137,7 +137,7 @@ test("texture toggles, random edits, and view modes keep one status and restore 
         assert.equal(await evaluate('window.__layer.clickBox("텍스처 표시")'), true);
         const restored = await waitFor(async () => {
             const state = await evaluate("window.__layer.snapshot()");
-            return state.status === "쌓인 레이어 7/7" && state.hash === baseline ? state : null;
+            return state.status === "쌓인 레이어 8/8" && state.hash === baseline ? state : null;
         }, 30000, "texture restored");
         assert.equal(restored.status.includes("한 레이어"), false);
         assert.equal(restored.boxes.every((box) => box.on), true);
@@ -151,14 +151,14 @@ test("texture toggles, random edits, and view modes keep one status and restore 
 
         assert.equal(await evaluate('window.__layer.clickText(".render-view-tabs button", "쌓기")'), true);
         await waitFor(async () => (await evaluate("window.__layer.snapshot()")).hash === baseline, 30000, "stack after solo");
-        assert.equal(await evaluate("window.__layer.status()"), "쌓인 레이어 7/7");
+        assert.equal(await evaluate("window.__layer.status()"), "쌓인 레이어 8/8");
 
         assert.equal(await evaluate('window.__layer.clickText(".render-view-tabs button", "격자")'), true);
         const grid = await evaluate("window.__layer.grid()");
-        assert.equal(grid.status, "일곱 레이어를 나란히 보고 있습니다");
+        assert.equal(grid.status, "여덟 레이어를 나란히 보고 있습니다");
         assert.equal(grid.status.includes("쌓인 레이어"), false);
-        assert.deepEqual(grid.names, ["LIGHT 라이트", "SHADOW 그림자", "TEXTURE 텍스처", "AO", "GLARE 글레어", "REFLECTION 반사", "AMBIENT 앰비언트"]);
-        assert.equal(grid.count, 7);
+        assert.deepEqual(grid.names, ["BASE 기본컬러", "LIGHT 라이트", "SHADOW 그림자", "TEXTURE 텍스처", "AO", "GLARE 글레어", "REFLECTION 반사", "AMBIENT 앰비언트"]);
+        assert.equal(grid.count, 8);
 
         assert.equal(await evaluate('window.__layer.clickText(".render-view-tabs button", "비교")'), true);
         const compare = await evaluate("window.__layer.compare()");
@@ -174,7 +174,7 @@ test("texture toggles, random edits, and view modes keep one status and restore 
 
         const random = mulberry32(44);
         for (let step = 0; step < 12; step++) {
-            const index = Math.floor(random() * 7);
+            const index = Math.floor(random() * 8);
             if (random() < 0.45) await evaluate(`window.__layer.toggle(${index})`);
             else await evaluate(`window.__layer.strength(${index}, ${Math.floor(random() * 101)})`);
             if (random() < 0.35) {
@@ -185,12 +185,12 @@ test("texture toggles, random edits, and view modes keep one status and restore 
             await sleep(40 + Math.floor(random() * 90));
         }
         const after = await evaluate("window.__layer.restore()");
-        assert.equal(after.status, "쌓인 레이어 7/7");
+        assert.equal(after.status, "쌓인 레이어 8/8");
         assert.equal(after.boxes.every((box) => box.on), true);
         assert.equal(after.strengths.every((value) => value === 100), true);
         await waitFor(async () => (await evaluate("window.__layer.snapshot()")).hash === baseline, 30000, "random edits restored");
         const finalState = await evaluate("window.__layer.snapshot()");
-        assert.equal(finalState.status, "쌓인 레이어 7/7");
+        assert.equal(finalState.status, "쌓인 레이어 8/8");
         assert.equal(finalState.status.includes("한 레이어"), false);
         assert.equal(finalState.boxes.every((box) => box.on), true);
 
@@ -322,7 +322,7 @@ function install() {
                 input.dispatchEvent(new Event("input", { bubbles: true }));
             }
             const scrub = document.querySelector('.render-layers input[aria-label="장면"]');
-            proto.call(scrub, "7");
+            proto.call(scrub, scrub.max);
             scrub.dispatchEvent(new Event("input", { bubbles: true }));
             return {
                 status: document.querySelector("[data-render-status]")?.textContent || "",

@@ -34,7 +34,7 @@ export function RenderLayerStage({ model }) {
 
     if (model.view === "grid") {
         return (
-            <div className="render-grid" aria-label="일곱 레이어">
+            <div className="render-grid" aria-label="여덟 레이어">
                 {RENDER_LAYERS.map((layer, index) => {
                     const plate = model.grids.find((item) => item.id === layer.id);
                     return (
