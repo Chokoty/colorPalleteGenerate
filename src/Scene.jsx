@@ -241,66 +241,32 @@ function palettePlacement(item, mode, shape) {
     return { position: [r * 255, g * 255, b * 255], radius: RGB_SPHERE_RADIUS };
 }
 
+function paletteHex(rgb) {
+    return `#${rgb.map((channel) => Math.round(Math.min(1, Math.max(0, channel)) * 255).toString(16).padStart(2, "0")).join("")}`;
+}
+
 function PaletteSpheres({ palette, mode, shape }) {
-    const fill = useRef(null);
-    const outline = useRef(null);
-    const count = palette.length;
     const geometry = useMemo(() => new THREE.SphereGeometry(1, 20, 14), []);
-    const fillMaterial = useMemo(() => new THREE.MeshBasicMaterial(), []);
-    const outlineMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: "#f4f4f4" }), []);
-
-    useLayoutEffect(() => {
-        const mesh = fill.current;
-        if (!mesh || count === 0) return;
-        const rim = outline.current;
-        const color = new THREE.Color();
-        const dummy = new THREE.Object3D();
-        for (let i = 0; i < count; i++) {
-            const { position, radius } = palettePlacement(palette[i], mode, shape);
-            dummy.position.set(position[0], position[1], position[2]);
-            dummy.scale.setScalar(radius);
-            dummy.updateMatrix();
-            mesh.setMatrixAt(i, dummy.matrix);
-            color.setRGB(palette[i].rgb[0], palette[i].rgb[1], palette[i].rgb[2]);
-            color.convertSRGBToLinear();
-            mesh.setColorAt(i, color);
-            if (rim) {
-                dummy.scale.setScalar(radius * 1.2);
-                dummy.updateMatrix();
-                rim.setMatrixAt(i, dummy.matrix);
-            }
-        }
-        mesh.instanceMatrix.needsUpdate = true;
-        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-        if (rim) rim.instanceMatrix.needsUpdate = true;
-    }, [count, mode, palette, shape]);
-
-    useEffect(
-        () => () => {
-            geometry.dispose();
-            fillMaterial.dispose();
-            outlineMaterial.dispose();
-        },
-        [fillMaterial, geometry, outlineMaterial]
-    );
-
-    if (count === 0) return null;
+    useEffect(() => () => geometry.dispose(), [geometry]);
+    if (palette.length === 0) return null;
     return (
         <group>
-            {mode === "hsv" && (
-                <instancedMesh
-                    key={`rim-${count}`}
-                    ref={outline}
-                    args={[geometry, outlineMaterial, count]}
-                    frustumCulled={false}
-                />
-            )}
-            <instancedMesh
-                key={`fill-${count}`}
-                ref={fill}
-                args={[geometry, fillMaterial, count]}
-                frustumCulled={false}
-            />
+            {palette.map((item, index) => {
+                const { position, radius } = palettePlacement(item, mode, shape);
+                const color = paletteHex(item.rgb);
+                return (
+                    <group key={`${mode}-${index}-${color}`} position={position}>
+                        {mode === "hsv" && (
+                            <mesh geometry={geometry} scale={radius * 1.16} frustumCulled={false}>
+                                <meshBasicMaterial color="#ffffff" side={THREE.BackSide} toneMapped={false} />
+                            </mesh>
+                        )}
+                        <mesh geometry={geometry} scale={radius} frustumCulled={false}>
+                            <meshBasicMaterial color={color} toneMapped={false} />
+                        </mesh>
+                    </group>
+                );
+            })}
         </group>
     );
 }

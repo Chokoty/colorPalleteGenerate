@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import { hsvToRgb, markerRadius, rgbToHsv, valueInWindow, WHEEL_VALUE_WINDOW } from "./hsv.js";
 
-const WHEEL_MARKER_MIN = 7;
-const WHEEL_MARKER_MAX = 22;
+const WHEEL_MARKER_MIN = 4;
+const WHEEL_MARKER_MAX = 12;
 
 function paintWheel(ctx, size, cloud, palette, value) {
     const image = ctx.createImageData(size, size);

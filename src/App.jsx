@@ -18,6 +18,7 @@ import SvgPanel from "./SvgPanel";
 import { useColorStudy } from "./useColorStudy";
 import { ReplayChrome } from "./ui/ReplayChrome";
 import { addPick, centersWithPicks, pickAt, removePick, restorePicks, rgb01ToHex } from "./pickedColors";
+import { tintedShadowPixel } from "./shadowTint";
 
 // Main-branch extraction: the user picks k, and centers are k-means means
 // of sampled RGB+XY points. Recolor fills each pixel with its center.
@@ -330,13 +331,12 @@ function flatChannels(center) {
     ];
 }
 
-function paintedChannels(data, index, center, shaded) {
+function paintedChannels(data, index, center, shaded, shadowTint) {
     if (!shaded) return flatChannels(center);
     const offset = index * 4;
-    const color = recolorPixel(
-        [data[offset], data[offset + 1], data[offset + 2]],
-        [center.rgb[0] * 255, center.rgb[1] * 255, center.rgb[2] * 255]
-    );
+    const pixel = [data[offset], data[offset + 1], data[offset + 2]];
+    const swatch = [center.rgb[0] * 255, center.rgb[1] * 255, center.rgb[2] * 255];
+    const color = shadowTint ? tintedShadowPixel(pixel, swatch) : recolorPixel(pixel, swatch);
     return [Math.floor(color[0]), Math.floor(color[1]), Math.floor(color[2])];
 }
 
@@ -410,7 +410,7 @@ function App() {
     const [inkNote, setInkNote] = useState("");
     const [dragActive, setDragActive] = useState(false);
     const [shadingVisible, setShadingVisible] = useState(false);
-    const [lineArtVisible, setLineArtVisible] = useState(true);
+    const [lineArtVisible, setLineArtVisible] = useState(false);
     const [colorVisible, setColorVisible] = useState([]);
     const [originalClusters, setOriginalClusters] = useState([]);
     const [bgColor, setBgColor] = useState("#ffffff");
@@ -418,6 +418,7 @@ function App() {
     const [colorOpacity, setColorOpacity] = useState([]);
     const [lineArtOpacity, setLineArtOpacity] = useState(100);
     const [shadingOpacity, setShadingOpacity] = useState(100);
+    const [shadowTint, setShadowTint] = useState(true);
     const [lineThumb, setLineThumb] = useState(null);
     const [lineArtThumb, setLineArtThumb] = useState(null);
     const [solo, setSolo] = useState(null);
@@ -451,13 +452,14 @@ function App() {
     const inkCacheRef = useRef(null);
     const shadingVisibleRef = useRef(false);
     const showLinesRef = useRef(false);
-    const lineArtVisibleRef = useRef(true);
+    const lineArtVisibleRef = useRef(false);
     const colorVisibleRef = useRef([]);
     const bgColorRef = useRef("#ffffff");
     const bgVisibleRef = useRef(true);
     const colorOpacityRef = useRef([]);
     const lineArtOpacityRef = useRef(100);
     const shadingOpacityRef = useRef(100);
+    const shadowTintRef = useRef(true);
     const soloRef = useRef(null);
     const clustersRef = useRef([]);
     const pickedPointsRef = useRef([]);
@@ -471,7 +473,7 @@ function App() {
     const [replayOpen, setReplayOpen] = useState(false);
     const [replayMenu, setReplayMenu] = useState(false);
     const [svgReplay, setSvgReplay] = useState(false);
-    const [layersOpen, setLayersOpen] = useState(true);
+    const [svgDock, setSvgDock] = useState(null);
     const [studyOpen, setStudyOpen] = useState(true);
     const [activeSampleId, setActiveSampleId] = useState(null);
     const loadSerialRef = useRef(0);
@@ -699,13 +701,13 @@ function App() {
                     imageRef.current = stored;
                     previewRef.current = stored;
                     inkCacheRef.current = null;
-                    lineArtVisibleRef.current = true;
+                    lineArtVisibleRef.current = false;
                     soloRef.current = null;
                     colorVisibleRef.current = [];
                     pickedPointsRef.current = [];
                     pickSerialRef.current = 0;
                     setPickedPoints([]);
-                    setLineArtVisible(true);
+                    setLineArtVisible(false);
                     setColorVisible([]);
                     setLineThumb(null);
                     setLineArtThumb(null);
@@ -1094,6 +1096,7 @@ function App() {
     colorOpacityRef.current = colorOpacity;
     lineArtOpacityRef.current = lineArtOpacity;
     shadingOpacityRef.current = shadingOpacity;
+    shadowTintRef.current = shadowTint;
     soloRef.current = solo;
 
     const paintComposite = () => {
@@ -1142,17 +1145,17 @@ function App() {
 
             const cluster = ids[p];
             const center = centers[cluster];
-            const colorOn = soloNow
-                ? soloNow.kind === "color"
-                    ? soloNow.index === cluster
-                    : soloNow.kind === "shade" && visibleColors[cluster] !== false
-                : visibleColors[cluster] !== false;
+            const colorOn = soloNow?.kind === "color"
+                ? soloNow.index === cluster
+                : soloNow?.kind === "bg"
+                    ? false
+                    : visibleColors[cluster] !== false;
             if (center && colorOn) {
                 const layerOp = (opacities[cluster] ?? 100) / 100;
                 if (layerOp <= 0) continue;
 
                 const shadeHere = soloNow?.kind === "color" ? false : soloNow?.kind === "shade" ? true : isShadingOn;
-                const color = paintedChannels(stored.data, p, center, shadeHere);
+                const color = paintedChannels(stored.data, p, center, shadeHere, shadowTintRef.current);
                 let finalR = color[0];
                 let finalG = color[1];
                 let finalB = color[2];
@@ -1196,40 +1199,52 @@ function App() {
         const drawLines = soloNow ? soloNow.kind === "lines" : showLinesRef.current;
         if (drawLines) {
             const edges = gradientEdges(stored.data, width, height);
-            const edgeAlpha = 230 / 255;
             for (let i = 0; i < edges.length; i++) {
                 if (!edges[i]) continue;
                 const offset = i * 4;
-                const destR = frame.data[offset];
-                const destG = frame.data[offset + 1];
-                const destB = frame.data[offset + 2];
                 const destA = frame.data[offset + 3] / 255;
                 if (bgActive || destA > 0) {
-                    frame.data[offset] = Math.round(25 * edgeAlpha + destR * (1 - edgeAlpha));
-                    frame.data[offset + 1] = Math.round(25 * edgeAlpha + destG * (1 - edgeAlpha));
-                    frame.data[offset + 2] = Math.round(25 * edgeAlpha + destB * (1 - edgeAlpha));
-                    frame.data[offset + 3] = bgActive ? 255 : Math.round((edgeAlpha + destA * (1 - edgeAlpha)) * 255);
+                    frame.data[offset] = Math.round(frame.data[offset] * 0.35);
+                    frame.data[offset + 1] = Math.round(frame.data[offset + 1] * 0.35);
+                    frame.data[offset + 2] = Math.round(frame.data[offset + 2] * 0.35);
                 } else {
                     frame.data[offset] = 25;
                     frame.data[offset + 1] = 25;
                     frame.data[offset + 2] = 25;
-                    frame.data[offset + 3] = Math.round(edgeAlpha * 255);
+                    frame.data[offset + 3] = 230;
                 }
             }
         }
-
-        ctx.putImageData(frame, 0, 0);
 
         const art = inkCacheRef.current;
         const drawInk = soloNow ? soloNow.kind === "ink" : lineArtVisibleRef.current;
         if (drawInk && art && art.source === stored.data) {
             const inkOp = (lineArtOpacityRef.current ?? 100) / 100;
+            const ink = art.art.rgba;
             if (inkOp > 0) {
-                ctx.globalAlpha = inkOp;
-                ctx.drawImage(inkPlate(art.art), 0, 0, width, height);
-                ctx.globalAlpha = 1.0;
+                const pixels = width * height;
+                for (let i = 0; i < pixels; i++) {
+                    const value = ink[i * 4];
+                    if (value > 226) continue;
+                    const offset = i * 4;
+                    const darkness = ((255 - value) / 255) * inkOp;
+                    const destA = frame.data[offset + 3] / 255;
+                    if (bgActive || destA > 0) {
+                        const keep = 1 - darkness;
+                        frame.data[offset] = Math.round(frame.data[offset] * keep);
+                        frame.data[offset + 1] = Math.round(frame.data[offset + 1] * keep);
+                        frame.data[offset + 2] = Math.round(frame.data[offset + 2] * keep);
+                    } else {
+                        frame.data[offset] = Math.round(value * (1 - darkness));
+                        frame.data[offset + 1] = frame.data[offset];
+                        frame.data[offset + 2] = frame.data[offset];
+                        frame.data[offset + 3] = Math.round(darkness * 255);
+                    }
+                }
             }
         }
+
+        ctx.putImageData(frame, 0, 0);
         view.width = width;
         view.height = height;
         const viewCtx = view.getContext("2d");
@@ -1253,8 +1268,6 @@ function App() {
             .then((art) => {
                 if (request !== inkRequestRef.current) return;
                 inkCacheRef.current = { source: preview.data, art };
-                lineArtVisibleRef.current = true;
-                setLineArtVisible(true);
                 setLineArtThumb(lineArtThumbnail(art));
                 setInkNote("");
             })
@@ -1304,6 +1317,7 @@ function App() {
         colorOpacity,
         lineArtOpacity,
         shadingOpacity,
+        shadowTint,
     ]);
 
     useEffect(() => {
@@ -1371,16 +1385,6 @@ function App() {
         </div>
     );
 
-    const drawLabel = centerTab === "svg" ? "SVG" : mode === "study" ? "STUDY" : "PALETTE";
-    const drawTime =
-        mode === "study"
-            ? study.analysis
-                ? `${study.analysis.ms}MS`
-                : ""
-            : recolorTime
-              ? `${recolorTime}MS`
-              : "";
-
     const exitReplay = () => {
         setReplayOpen(false);
         setReplayMenu(false);
@@ -1409,15 +1413,16 @@ function App() {
     const renderModeTabs = (includeStudy = false) => (
         <div role="tablist" className="mode-tabs" aria-label="추출 방식">
             {[
-                ["auto", "자동 추출"],
-                ["manual", "직접 설정"],
-                ...(includeStudy ? [["study", "채색 공부"]] : []),
-            ].map(([id, label]) => (
+                ["auto", "자동 추출", "그림에서 대표 색을 자동으로 뽑습니다"],
+                ["manual", "직접 설정", "색 개수와 가중치를 직접 정합니다"],
+                ...(includeStudy ? [["study", "채색 공부", "빛을 빼서 밑색을 봅니다"]] : []),
+            ].map(([id, label, hint]) => (
                 <button
                     key={id}
                     type="button"
                     role="tab"
                     aria-selected={mode === id}
+                    title={hint}
                     onClick={() => switchMode(id)}
                     className={`mode-tab${mode === id ? " mode-tab-active" : ""}`}
                 >
@@ -1447,7 +1452,7 @@ function App() {
                     className={`mode-tab${centerTab === "recolor" ? " mode-tab-active" : ""}`}
                     onClick={() => openCenter("recolor")}
                 >
-                    재색상
+                    다시 칠하기
                 </button>
             )}
             <button
@@ -1475,7 +1480,7 @@ function App() {
                     onOpenSample={openSample}
                 />
             )}
-            {imageData && centerTab !== "svg" && renderViewTabs()}
+            {replayOpen && imageData && centerTab !== "svg" && renderViewTabs()}
             {imageData && mode === "study" && centerTab !== "svg" && <StudyTools study={study} />}
         </>
     );
@@ -1483,15 +1488,43 @@ function App() {
     return (
         <div className={`app${stageOpen ? " is-replay" : ""}`}>
             {loadError && <p className="load-error">{loadError}</p>}
+            <header className="top">
+                <div className="top-brand">
+                    <h1>컬러 팔레트</h1>
+                    <p>그림을 올리면 색을 뽑고, 그 색으로 다시 칠합니다.</p>
+                </div>
+                <div className="top-actions">
+                    {renderModeTabs(true)}
+                    {imageData && renderViewTabs()}
+                    <button
+                        type="button"
+                        className="mode-tab top-open"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isLoadingImage}
+                    >
+                        그림 열기
+                    </button>
+                </div>
+            </header>
+            {activeSample && (
+                <p className="sample-banner">예시 그림이 열려 있습니다. 내 그림으로 바꾸려면 그림 열기를 누르세요.</p>
+            )}
             <PreviewBoundary resetKey={uploadId}>
             <div className={`workspace${imageData ? " has-image" : ""}`}>
                 <aside className="panel panel-left">
-                    <h1 className="panel-title">
-                        <span className="kicker">Palette</span>
-                        컬러 팔레트 추출기
-                    </h1>
+                    <header className="region-head">
+                        <h2>
+                            <span className="region-index">1</span>
+                            원본
+                        </h2>
+                        <p>
+                            {imageData
+                                ? "올린 그림입니다. 스포이트로 색을 더 집을 수 있습니다."
+                                : "여기에 그림을 놓거나, 위의 그림 열기를 누르세요."}
+                        </p>
+                    </header>
                     <div
-                        className={`drop-zone${dragActive ? " drop-zone-active" : ""}`}
+                        className={`drop-zone${imageData ? " drop-zone-compact" : ""}${dragActive ? " drop-zone-active" : ""}`}
                         onDragOver={(e) => {
                             e.preventDefault();
                             setDragActive(true);
@@ -1512,8 +1545,14 @@ function App() {
                                         d="M5 20q-.825 0-1.413-.588T3 18v-3h2v3h14v-3h2v3q0 .825-.588 1.413T19 20zm6-4V7.85l-2.6 2.6L7 9l5-5l5 5l-1.4 1.45l-2.6-2.6V16z"
                                     />
                                 </svg>
-                                <span className="drop-zone-title">클릭하거나 이미지를 끌어다 놓으세요</span>
-                                <span className="drop-zone-hint">PNG · JPG · WEBP 등 이미지 파일</span>
+                                {imageData ? (
+                                    <span className="drop-zone-title">다른 그림으로 바꾸기</span>
+                                ) : (
+                                    <>
+                                        <span className="drop-zone-title">그림을 여기에 놓기</span>
+                                        <span className="drop-zone-hint">PNG, JPG, WEBP</span>
+                                    </>
+                                )}
                             </>
                         )}
                         <input
@@ -1524,7 +1563,48 @@ function App() {
                             disabled={isLoadingImage}
                         />
                     </div>
-                    {renderModeTabs()}
+                    {mode === "manual" && (
+                        <form
+                            className="settings-panel"
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                applySettings();
+                            }}
+                        >
+                            <p className="region-sub">직접 설정. 이 값으로 색을 다시 나눕니다.</p>
+                            <label>색상 가중치: </label>
+                            <input
+                                type="number"
+                                value={colorWeight}
+                                onChange={(e) => setColorWeight(e.target.value)}
+                                step="0.1"
+                                min="0"
+                            />
+                            <label>공간 가중치: </label>
+                            <input
+                                type="number"
+                                value={spatialWeight}
+                                onChange={(e) => setSpatialWeight(e.target.value)}
+                                step="0.1"
+                                min="0"
+                            />
+                            <label>클러스터 개수: </label>
+                            <input
+                                type="number"
+                                value={clusterCount}
+                                onChange={(e) => setClusterCount(e.target.value)}
+                                step="1"
+                                min="1"
+                            />
+                            <button
+                                type="submit"
+                                className="settings-panel-apply-btn"
+                                disabled={isUpdating || isLoadingImage}
+                            >
+                                {isUpdating ? "적용 중..." : "적용"}
+                            </button>
+                        </form>
+                    )}
                     {imageData && mode !== "study" && (
                         <div className="panel-image">
                             <div className="button-row">
@@ -1537,7 +1617,6 @@ function App() {
                                     스포이트
                                 </button>
                             </div>
-                            <span className="image-frame-label">원본</span>
                             <div
                                 className={`image-with-dots${eyedropper ? " is-picking" : ""}`}
                                 onClick={eyedropper ? addPickFromOriginal : undefined}
@@ -1591,7 +1670,7 @@ function App() {
                     )}
                     {imageData && mode !== "study" && (
                         <details className="scene-block">
-                            <summary>색 분포</summary>
+                            <summary>색이 어디에 모였는지</summary>
                             <div className="scene-tabs" role="tablist" aria-label="색 분포 보기">
                                 <button
                                     type="button"
@@ -1621,7 +1700,7 @@ function App() {
                                     색상환
                                 </button>
                             </div>
-                            <p>재색상화 시간: {recolorTime}ms</p>
+                            <p>다시 칠하는 데 {recolorTime}ms</p>
                             {!colorCloud && <p className="scene-pending">색 분포를 계산하는 중</p>}
                             <div className="scene-view">
                                 {distTab === "wheel" ? (
@@ -1648,7 +1727,7 @@ function App() {
                                         checked={showConvexHull}
                                         onChange={(e) => setShowConvexHull(e.target.checked)}
                                     />
-                                    Show Convex Hull
+                                    겉면 보이기
                                 </label>
                             )}
                             {distTab === "hsv" && (
@@ -1673,50 +1752,22 @@ function App() {
                             )}
                         </details>
                     )}
-                    {mode === "manual" && (
-                        <form
-                            className="settings-panel"
-                            onSubmit={(e) => {
-                                e.preventDefault();
-                                applySettings();
-                            }}
-                        >
-                            <label>색상 가중치: </label>
-                            <input
-                                type="number"
-                                value={colorWeight}
-                                onChange={(e) => setColorWeight(e.target.value)}
-                                step="0.1"
-                                min="0"
-                            />
-                            <label>공간 가중치: </label>
-                            <input
-                                type="number"
-                                value={spatialWeight}
-                                onChange={(e) => setSpatialWeight(e.target.value)}
-                                step="0.1"
-                                min="0"
-                            />
-                            <label>클러스터 개수: </label>
-                            <input
-                                type="number"
-                                value={clusterCount}
-                                onChange={(e) => setClusterCount(e.target.value)}
-                                step="1"
-                                min="1"
-                            />
-                            <button
-                                type="submit"
-                                className="settings-panel-apply-btn"
-                                disabled={isUpdating || isLoadingImage}
-                            >
-                                {isUpdating ? "적용 중..." : "적용"}
-                            </button>
-                        </form>
-                    )}
                 </aside>
 
                 <main className={`panel panel-center${centerTab === "svg" ? " svg-open" : ""}`}>
+                    <header className="region-head">
+                        <h2>
+                            <span className="region-index">2</span>
+                            {centerTab === "svg" ? "선으로 따라 그린 그림" : mode === "study" ? "밑색" : "다시 칠한 그림"}
+                        </h2>
+                        <p>
+                            {centerTab === "svg"
+                                ? "같은 그림을 면과 선으로 따라 그립니다."
+                                : mode === "study"
+                                  ? "구분선 왼쪽은 원본, 오른쪽은 빛을 뺀 색입니다."
+                                  : "1번 그림에서 뽑은 색으로 다시 칠한 결과입니다."}
+                        </p>
+                    </header>
                     <div hidden={centerTab === "svg"}>
                         <ReplayChrome
                             active={replayOpen && centerTab !== "svg"}
@@ -1727,22 +1778,15 @@ function App() {
                             panel={replayOpen && replayMenu ? tools : null}
                         >
                             <div className="device">
-                                <div className="device-kicker">
-                                    <span>
-                                        Draw <strong>{drawLabel}</strong>
-                                    </span>
-                                    {drawTime && <span className="device-time">{drawTime}</span>}
-                                </div>
                                 <div className="device-meta">
                                     {imageData && mode === "study" && <StudySummary study={study} />}
                                     {imageData && mode !== "study" && clusters.length > 0 && (
                                         <div className="palette-summary">
-                                            <div className="stat-count">{clusters.length} swatches</div>
+                                            <div className="stat-count">색 {clusters.length}개</div>
                                             {mode === "auto" && (
-                                                <div className="stat-sub">stop ΔE {Math.round(deltaEStop)}</div>
+                                                <div className="stat-sub">비슷한 색은 한 칸으로 묶었습니다.</div>
                                             )}
-                                            {renderShareBar("top")}
-                                            {isUpdating && <p className="stat-sub">색상 변경 중...</p>}
+                                            {isUpdating && <p className="stat-sub">색을 다시 칠하는 중</p>}
                                         </div>
                                     )}
                                 </div>
@@ -1771,7 +1815,9 @@ function App() {
                                     </div>
                                     {imageData && mode !== "study" && isLandscape && clusters.length > 0 && renderShareBar("bottom")}
                                 </div>
-                                {!replayOpen && <div className="device-controls">{tools}</div>}
+                                {!replayOpen && imageData && mode === "study" && centerTab !== "svg" && (
+                                    <div className="device-controls">{tools}</div>
+                                )}
                             </div>
                         </ReplayChrome>
                     </div>
@@ -1780,11 +1826,10 @@ function App() {
                             <SvgPanel
                                 active={centerTab === "svg"}
                                 uploadId={uploadId}
-                                mode={mode}
                                 image={imageRef.current}
                                 fileName={imageInfo?.name}
-                                onView={openCenter}
                                 onReplayActive={setSvgReplay}
+                                dock={centerTab === "svg" ? svgDock : null}
                             />
                         </div>
                     )}
@@ -1802,20 +1847,34 @@ function App() {
                     )}
                 </main>
 
-                <aside className="panel panel-right" aria-label="레이어와 채색 공부">
-                    <details
-                        className="layer-dock"
-                        open={layersOpen}
-                        onToggle={(event) => setLayersOpen(event.currentTarget.open)}
-                    >
-                        <summary className="dock-summary">
-                            <span className="layer-dock-title">레이어</span>
-                            <span className="dock-summary-hint">{layersOpen ? "눌러서 접기" : "눌러서 펼치기"}</span>
-                        </summary>
+                <aside className="panel panel-right" aria-label={centerTab === "svg" ? "그리는 순서" : mode === "study" ? "채색 공부" : "뽑은 색"}>
+                    <header className="region-head">
+                        <h2>
+                            <span className="region-index">3</span>
+                            {centerTab === "svg" ? "그리는 순서" : mode === "study" ? "채색 공부" : "뽑은 색"}
+                        </h2>
+                        <p>
+                            {centerTab === "svg"
+                                ? "재생 막대를 움직이거나 칸을 누르면 그 장면까지 그려집니다."
+                                : mode === "study"
+                                    ? "빛을 빼서 그림의 밑색을 봅니다."
+                                    : "색 칸을 누르면 그 색만 보고, 체크는 보이기입니다."}
+                        </p>
+                    </header>
+                    {centerTab === "svg" ? (
+                        <div className="svg-dock" ref={setSvgDock}>
+                            {!imageData && (
+                                <div className="panel-placeholder panel-placeholder-dark">
+                                    그림을 열면 그리는 순서가 여기에 쌓입니다.
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                    <div className="layer-list">
                         <div className="dock-body">
                             {!imageData && (
                                 <div className="panel-placeholder panel-placeholder-dark">
-                                    이미지를 올리면 색마다 칸이 생깁니다.
+                                    그림을 올리면 여기에 뽑은 색이 쌓입니다.
                                 </div>
                             )}
                             {imageData && mode === "study" && <StudyLayers study={study} />}
@@ -1843,112 +1902,6 @@ function App() {
                                     </div>
                             </div>
                             )}
-                            <div className="layer-row-wrapper">
-                                <div
-                                    className="layer-row"
-                                    data-hidden={showLines ? "false" : "true"}
-                                    data-solo={solo?.kind === "lines" ? "true" : "false"}
-                                    onClick={() => toggleSolo({ kind: "lines" })}
-                                >
-                                    {lineThumb ? <img src={lineThumb} alt="" /> : <span className="layer-thumb" />}
-                                    <span className="layer-name">
-                                        <span className="layer-name-top">선 필터</span>
-                                        <span className="layer-share">밝기 경계</span>
-                                    </span>
-                                    <input
-                                        type="checkbox"
-                                        checked={showLines}
-                                        aria-label="선 필터 표시"
-                                        onClick={(event) => event.stopPropagation()}
-                                        onChange={(event) => {
-                                            showLinesRef.current = event.target.checked;
-                                            setShowLines(event.target.checked);
-                                        }}
-                                    />
-                                </div>
-                            </div>
-                            <div className="layer-row-wrapper">
-                                <div
-                                    className="layer-row"
-                                    data-hidden={lineArtVisible ? "false" : "true"}
-                                    data-solo={solo?.kind === "ink" ? "true" : "false"}
-                                    onClick={() => toggleSolo({ kind: "ink" })}
-                                >
-                                    {lineArtThumb ? <img src={lineArtThumb} alt="" /> : <span className="layer-thumb" />}
-                                    <span className="layer-name">
-                                        <span className="layer-name-top">선화</span>
-                                        <span className="layer-share">{inkNote || `불투명도 ${lineArtOpacity}%`}</span>
-                                    </span>
-                                    <input
-                                        type="checkbox"
-                                        checked={lineArtVisible}
-                                        aria-label="선화 표시"
-                                        onClick={(event) => event.stopPropagation()}
-                                        onChange={(event) => {
-                                            lineArtVisibleRef.current = event.target.checked;
-                                            setLineArtVisible(event.target.checked);
-                                        }}
-                                    />
-                                </div>
-                                    {lineArtVisible && (
-                                        <div className="layer-opacity-row">
-                                            <input
-                                                type="range"
-                                                min="0"
-                                                max="100"
-                                                value={lineArtOpacity}
-                                                aria-label="선화 불투명도"
-                                                onChange={(e) => {
-                                                    const val = Number(e.target.value);
-                                                    lineArtOpacityRef.current = val;
-                                                    setLineArtOpacity(val);
-                                                }}
-                                            />
-                                            <span>{lineArtOpacity}%</span>
-                                        </div>
-                                    )}
-                            </div>
-                            <div className="layer-row-wrapper">
-                                <div
-                                    className="layer-row"
-                                    data-hidden={shadingVisible ? "false" : "true"}
-                                    data-solo={solo?.kind === "shade" ? "true" : "false"}
-                                    onClick={() => toggleSolo({ kind: "shade" })}
-                                >
-                                    <span className="layer-thumb" />
-                                    <span className="layer-name">
-                                        <span className="layer-name-top">음영</span>
-                                        <span className="layer-share">원본 명암 겹침 · {shadingOpacity}%</span>
-                                    </span>
-                                        <input
-                                            type="checkbox"
-                                            checked={shadingVisible}
-                                            aria-label="음영 표시"
-                                            onClick={(event) => event.stopPropagation()}
-                                            onChange={(e) => {
-                                                shadingVisibleRef.current = e.target.checked;
-                                                setShadingVisible(e.target.checked);
-                                            }}
-                                        />
-                                    </div>
-                                {shadingVisible && (
-                                    <div className="layer-opacity-row">
-                                        <input
-                                            type="range"
-                                            min="0"
-                                            max="100"
-                                            value={shadingOpacity}
-                                            aria-label="음영 불투명도"
-                                            onChange={(e) => {
-                                                const val = Number(e.target.value);
-                                                shadingOpacityRef.current = val;
-                                                setShadingOpacity(val);
-                                            }}
-                                        />
-                                        <span>{shadingOpacity}%</span>
-                                    </div>
-                                )}
-                            </div>
                             {clusters
                                 .map((c, i) => ({ c, i, share: opaqueShares[i] ?? 0 }))
                                 .filter((item) => item.c?.rgb)
@@ -2038,6 +1991,148 @@ function App() {
                                         </div>
                                     );
                                 })}
+                            <details className="overlay-tools">
+                                <summary>선과 음영</summary>
+                                <p className="region-sub">색은 그대로 두고 선이나 명암만 위에 겹칩니다.</p>
+                            <div className="layer-row-wrapper">
+                                <div
+                                    className="layer-row"
+                                    data-hidden={showLines ? "false" : "true"}
+                                    data-solo={solo?.kind === "lines" ? "true" : "false"}
+                                    onClick={() => {
+                                        if (solo?.kind === "lines") toggleSolo({ kind: "lines" });
+                                        showLinesRef.current = !showLines;
+                                        setShowLines((on) => !on);
+                                    }}
+                                >
+                                    {lineThumb ? <img src={lineThumb} alt="" /> : <span className="layer-thumb" />}
+                                    <span className="layer-name">
+                                        <span className="layer-name-top">선 필터</span>
+                                        <span className="layer-share">밝기 차이로 바로 그린 경계</span>
+                                    </span>
+                                    <input
+                                        type="checkbox"
+                                        checked={showLines}
+                                        aria-label="선 필터 표시"
+                                        onClick={(event) => event.stopPropagation()}
+                                        onChange={(event) => {
+                                            showLinesRef.current = event.target.checked;
+                                            setShowLines(event.target.checked);
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                            <div className="layer-row-wrapper">
+                                <div
+                                    className="layer-row"
+                                    data-hidden={lineArtVisible ? "false" : "true"}
+                                    data-solo={solo?.kind === "ink" ? "true" : "false"}
+                                    onClick={() => {
+                                        if (solo?.kind === "ink") toggleSolo({ kind: "ink" });
+                                        lineArtVisibleRef.current = !lineArtVisible;
+                                        setLineArtVisible((on) => !on);
+                                    }}
+                                >
+                                    {lineArtThumb ? <img src={lineArtThumb} alt="" /> : <span className="layer-thumb" />}
+                                    <span className="layer-name">
+                                        <span className="layer-name-top">선화</span>
+                                        <span className="layer-share">{inkNote || "따 온 먹선. 색 위에 겹칩니다"}</span>
+                                    </span>
+                                    <input
+                                        type="checkbox"
+                                        checked={lineArtVisible}
+                                        aria-label="선화 표시"
+                                        onClick={(event) => event.stopPropagation()}
+                                        onChange={(event) => {
+                                            lineArtVisibleRef.current = event.target.checked;
+                                            setLineArtVisible(event.target.checked);
+                                        }}
+                                    />
+                                </div>
+                                    {lineArtVisible && (
+                                        <div className="layer-opacity-row">
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="100"
+                                                value={lineArtOpacity}
+                                                aria-label="선화 불투명도"
+                                                onChange={(e) => {
+                                                    const val = Number(e.target.value);
+                                                    lineArtOpacityRef.current = val;
+                                                    setLineArtOpacity(val);
+                                                }}
+                                            />
+                                            <span>{lineArtOpacity}%</span>
+                                        </div>
+                                    )}
+                            </div>
+                            <div className="layer-row-wrapper">
+                                <div
+                                    className="layer-row"
+                                    data-hidden={shadingVisible ? "false" : "true"}
+                                    data-solo={solo?.kind === "shade" ? "true" : "false"}
+                                    onClick={() => {
+                                        if (solo?.kind === "shade") toggleSolo({ kind: "shade" });
+                                        shadingVisibleRef.current = !shadingVisible;
+                                        setShadingVisible((on) => !on);
+                                    }}
+                                >
+                                    <span className="layer-thumb" />
+                                    <span className="layer-name">
+                                        <span className="layer-name-top">음영</span>
+                                        <span className="layer-share">
+                                            {shadowTint
+                                                ? `어두운 곳은 색을 살짝 틀어 칠함 · ${shadingOpacity}%`
+                                                : `평평한 색 위에 원본 명암 · ${shadingOpacity}%`}
+                                        </span>
+                                    </span>
+                                        <input
+                                            type="checkbox"
+                                            checked={shadingVisible}
+                                            aria-label="음영 표시"
+                                            onClick={(event) => event.stopPropagation()}
+                                            onChange={(e) => {
+                                                shadingVisibleRef.current = e.target.checked;
+                                                setShadingVisible(e.target.checked);
+                                            }}
+                                        />
+                                    </div>
+                                {shadingVisible && (
+                                    <>
+                                        <label className="shadow-tint-row">
+                                            <input
+                                                type="checkbox"
+                                                checked={shadowTint}
+                                                aria-label="그림자 색 틀기"
+                                                onChange={(event) => {
+                                                    shadowTintRef.current = event.target.checked;
+                                                    setShadowTint(event.target.checked);
+                                                }}
+                                            />
+                                            <span>
+                                                색 틀기
+                                                <em>어두운 곳을 차가운 쪽으로 조금 돌리고 채도를 낮춥니다.</em>
+                                            </span>
+                                        </label>
+                                        <div className="layer-opacity-row">
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="100"
+                                                value={shadingOpacity}
+                                                aria-label="음영 불투명도"
+                                                onChange={(e) => {
+                                                    const val = Number(e.target.value);
+                                                    shadingOpacityRef.current = val;
+                                                    setShadingOpacity(val);
+                                                }}
+                                            />
+                                            <span>{shadingOpacity}%</span>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
                             <div className="layer-row-wrapper layer-row-bg-wrapper">
                                 <div
                                     className="layer-row layer-row-bg"
@@ -2073,30 +2168,21 @@ function App() {
                                     />
                                 </div>
                             </div>
+                            </details>
                                 </>
                             )}
                         </div>
-                    </details>
-                    <button
-                        type="button"
-                        className={`mode-tab study-entry${mode === "study" ? " mode-tab-active" : ""}`}
-                        aria-pressed={mode === "study"}
-                        onClick={() => switchMode("study")}
-                    >
-                        채색 공부
-                    </button>
-                    {mode !== "study" && (
-                        <p className="dock-aside-note">빛을 빼서 그림의 밑색을 봅니다.</p>
+                    </div>
                     )}
-                    {mode === "study" && (
+                    {mode === "study" && centerTab !== "svg" && (
                         <details
                             className="study-dock"
                             open={studyOpen}
                             onToggle={(event) => setStudyOpen(event.currentTarget.open)}
                         >
                             <summary className="dock-summary">
-                                <span className="layer-dock-title">채색 공부</span>
-                                <span className="dock-summary-hint">빛을 빼서 밑색을 봅니다</span>
+                                <span className="layer-dock-title">예시와 빛</span>
+                                <span className="dock-summary-hint">샘플을 고르고 밝은 곳을 집습니다</span>
                             </summary>
                             <StudyControls
                                 study={study}
