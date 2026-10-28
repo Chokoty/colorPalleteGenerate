@@ -177,40 +177,46 @@ test("vector layers and svg follow that order and name each group", () => {
     }
     const ink = new Uint8Array(width * height);
     for (let x = 2; x < 40; x++) ink[8 * width + x] = 1;
-    const result = buildVectorLayers({
-        picture: pictureFromPixels(new Uint8ClampedArray(width * height * 4), width, height),
-        width,
-        height,
-        labels,
-        mass,
-        colors: [
-            { rgb: [220, 70, 60], hex: "#dc463c", count: 1000, shadow: { rgb: [120, 30, 28], hex: "#781c1c" }, light: null },
-            { rgb: [50, 90, 180], hex: "#325ab4", count: 600, shadow: null, light: { rgb: [180, 210, 245], hex: "#b4d2f5" } },
-            { rgb: [230, 190, 40], hex: "#e6be28", count: 25, shadow: null, light: null },
-        ],
-        ink: { mask: ink, width, height },
-        epsilon: 0.8,
-        minArea: 8,
-        detailArea: 80,
-        maxSide: 48,
-        detail: 80,
-    });
-    const roles = result.layers.map((layer) => layer.role);
-    assert.deepEqual(roles, ["base", "base", "shadow", "light", "detail", "line"]);
-    assert.equal(result.layers[0].area > result.layers[1].area, true);
-    assert.equal(result.layers[result.layers.length - 1].kind, "stroke");
-    assert.ok(result.layers.at(-1).paths.length >= 1);
-    const doc = layersToSvg(result.layers, width, height);
-    assert.equal(doc.pathCount, countPaths(result.layers));
+    const picture = pictureFromPixels(new Uint8ClampedArray(width * height * 4), width, height);
+    assert.throws(
+        () => buildVectorLayers({
+            picture,
+            width,
+            height,
+            labels,
+            mass,
+            colors: [
+                { rgb: [220, 70, 60], hex: "#dc463c", count: 1000, shadow: { rgb: [120, 30, 28], hex: "#781c1c" }, light: null },
+                { rgb: [50, 90, 180], hex: "#325ab4", count: 600, shadow: null, light: { rgb: [180, 210, 245], hex: "#b4d2f5" } },
+                { rgb: [230, 190, 40], hex: "#e6be28", count: 25, shadow: null, light: null },
+            ],
+            ink: { mask: ink, width, height },
+            epsilon: 0.8,
+            minArea: 8,
+            detailArea: 80,
+            maxSide: 48,
+            detail: 80,
+        }),
+        /picture\.original/
+    );
+    const layers = [
+        { id: "base-01", name: "밑색 01 · #dc463c", role: "base", kind: "fill", hex: "#dc463c", d: "M0 0 L10 0 L10 10 Z", paths: [[]], lengths: [] },
+        { id: "base-02", name: "밑색 02", role: "base", kind: "fill", hex: "#325ab4", d: "M0 0 L1 0 L1 1 Z", paths: [[]], lengths: [] },
+        { id: "shadow-01", name: "그림자", role: "shadow", kind: "fill", hex: "#781c1c", d: "M0 0 L2 0 L2 2 Z", paths: [[]], lengths: [] },
+        { id: "detail-01", name: "디테일", role: "detail", kind: "fill", hex: "#e6be28", d: "M0 0 L1 0 L1 1 Z", paths: [[]], lengths: [] },
+        { id: "line-01", name: "선화", role: "line", kind: "stroke", hex: "#1c1c1c", d: ["M0 0 L10 0"], paths: [[0, 0, 10, 0]], lengths: [10], strokeWidth: 1 },
+    ];
+    const doc = layersToSvg(layers, width, height);
+    assert.equal(doc.pathCount, countPaths(layers));
     assert.equal(doc.bytes, new TextEncoder().encode(doc.svg).length);
     const ids = [...doc.svg.matchAll(/<g id="([^"]+)"/g)].map((match) => match[1]);
-    assert.deepEqual(ids, result.layers.map((layer) => layer.id));
+    assert.deepEqual(ids, layers.map((layer) => layer.id));
     assert.match(doc.svg, /inkscape:groupmode="layer"/);
     assert.match(doc.svg, /i:layer="yes"/);
     assert.match(doc.svg, /data-name="밑색 01 · #dc463c"/);
     assert.ok(doc.svg.indexOf('id="shadow-01"') > doc.svg.indexOf('id="base-02"'));
     assert.ok(doc.svg.indexOf('id="line-01"') > doc.svg.indexOf('id="detail-01"'));
-    const animated = layersToSvg(result.layers, width, height, { animated: true, speed: 1 });
+    const animated = layersToSvg(layers, width, height, { animated: true, speed: 1 });
     assert.match(animated.svg, /@keyframes svg-reveal/);
     assert.match(animated.svg, /@keyframes svg-draw/);
     assert.match(animated.svg, /stroke-dasharray:var\(--len\)/);

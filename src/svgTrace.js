@@ -702,6 +702,9 @@ function finalizeLayers(layers) {
 
 export function buildVectorLayers(job) {
     traceSource(job?.picture);
+    if (job.labels != null || job.colors != null || job.mass != null || job.data != null || job.ink != null) {
+        throw new Error("SVG traces picture.original only");
+    }
     const width = job.width;
     const height = job.height;
     const settings = detailSettings(job.detail ?? 60, width, height);

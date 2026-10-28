@@ -70,6 +70,13 @@ test("completeTrace and buildVectorLayers reject arbitrary pixels", async () => 
         /picture\.original/
     );
     const picture = pictureFromPixels(pixels, width, height);
+    const forgedLabels = new Uint16Array(width * height);
+    forgedLabels.fill(0);
+    const forgedColors = [{ rgb: [1, 2, 3], hex: "#010203", count: width * height }];
+    assert.throws(
+        () => buildVectorLayers({ picture, width, height, labels: forgedLabels, colors: forgedColors }),
+        /picture\.original/
+    );
     const traced = await completeTrace(picture, () => "<svg></svg>");
     assert.equal(traced.width, width);
     assert.equal(traced.height, height);
