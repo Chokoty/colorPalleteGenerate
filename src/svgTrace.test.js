@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { pictureFromPixels } from "./picture.js";
 import {
     buildVectorLayers,
     contoursToPath,
@@ -177,6 +178,7 @@ test("vector layers and svg follow that order and name each group", () => {
     const ink = new Uint8Array(width * height);
     for (let x = 2; x < 40; x++) ink[8 * width + x] = 1;
     const result = buildVectorLayers({
+        picture: pictureFromPixels(new Uint8ClampedArray(width * height * 4), width, height),
         width,
         height,
         labels,

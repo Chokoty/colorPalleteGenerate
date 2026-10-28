@@ -1194,18 +1194,52 @@ function traceInput(picture, detail, colorCount, ink) {
     };
 }
 
-// Worker entry. The raw buffer stays in this module; the app calls trace(picture).
-export async function completeTrace(job, traceSvg, onProgress) {
+// Other modules can call this only with a picture from picture.js.
+// A raw pixel buffer is not a picture, so traceSource rejects it.
+export async function completeTrace(picture, traceSvg, onProgress) {
+    const input = traceInput(picture, picture?.detail ?? 64, picture?.colorCount ?? 8, picture?.ink);
     return buildDrawnTrace({
-        data: job.data,
-        width: job.width,
-        height: job.height,
-        detail: job.detail,
-        colorCount: job.colorCount,
-        ink: job.ink,
+        ...input,
         traceSvg,
         onProgress,
     });
+}
+
+function inTraceWorker() {
+    return typeof WorkerGlobalScope !== "undefined" && typeof self !== "undefined" && self instanceof WorkerGlobalScope;
+}
+
+if (inTraceWorker()) {
+    let tracer;
+    self.onmessage = async (event) => {
+        const job = event.data;
+        try {
+            if (!tracer) {
+                const wasmUrl = (await import("vtracer-wasm/vtracer.wasm?url")).default;
+                const { asTraceFn, loadVtracer } = await import("./vtracerTrace.js");
+                tracer = asTraceFn(await loadVtracer(wasmUrl));
+            }
+            const result = await buildDrawnTrace({
+                data: job.data,
+                width: job.width,
+                height: job.height,
+                detail: job.detail,
+                colorCount: job.colorCount,
+                ink: job.ink,
+                traceSvg: tracer,
+                onProgress: (progress) => {
+                    self.postMessage({ type: "progress", id: job.id, ...progress });
+                },
+            });
+            self.postMessage({ type: "result", id: job.id, result });
+        } catch (error) {
+            self.postMessage({
+                type: "error",
+                id: job.id,
+                error: String(error && error.message ? error.message : error),
+            });
+        }
+    };
 }
 
 function traceWithWorker(input, onProgress) {

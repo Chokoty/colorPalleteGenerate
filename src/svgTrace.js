@@ -1,3 +1,5 @@
+import { traceSource } from "./picture.js";
+
 // In-browser image-to-SVG. No server, no model, no OpenCV.
 // Filled regions become simplified polygons (pixel-corner contours +
 // Ramer–Douglas–Peucker). Line art is thinned to a centerline and stored
@@ -699,6 +701,7 @@ function finalizeLayers(layers) {
 }
 
 export function buildVectorLayers(job) {
+    traceSource(job?.picture);
     const width = job.width;
     const height = job.height;
     const settings = detailSettings(job.detail ?? 60, width, height);

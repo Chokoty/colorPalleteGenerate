@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { trace } from "./drawnTrace.js";
+import { completeTrace, trace } from "./drawnTrace.js";
 import { derivedPicture, pictureFromPixels, traceSource } from "./picture.js";
+import { buildVectorLayers } from "./svgTrace.js";
 
 function solid(width, height, rgb) {
     const data = new Uint8ClampedArray(width * height * 4);
@@ -49,4 +50,27 @@ test("a derived recolor buffer is rejected", () => {
     assert.throws(() => {
         picture.original = recolored;
     }, TypeError);
+});
+
+test("completeTrace and buildVectorLayers reject arbitrary pixels", async () => {
+    const width = 4;
+    const height = 4;
+    const pixels = solid(width, height, [9, 8, 7]);
+    await assert.rejects(
+        () => completeTrace({ data: pixels, width, height }, () => "<svg></svg>"),
+        /picture\.original/
+    );
+    await assert.rejects(
+        () => completeTrace(derivedPicture(pixels, width, height), () => "<svg></svg>"),
+        /picture\.original/
+    );
+    assert.throws(() => buildVectorLayers({ data: pixels, width, height }), /picture\.original/);
+    assert.throws(
+        () => buildVectorLayers({ width, height, labels: new Uint16Array(width * height), colors: [] }),
+        /picture\.original/
+    );
+    const picture = pictureFromPixels(pixels, width, height);
+    const traced = await completeTrace(picture, () => "<svg></svg>");
+    assert.equal(traced.width, width);
+    assert.equal(traced.height, height);
 });
