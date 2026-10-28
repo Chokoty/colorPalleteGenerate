@@ -15,6 +15,8 @@ export function MatteStage({ model }) {
     const sourceRef = useRef(null);
     const matteRef = useRef(null);
 
+    // Source is stored before the result arrives, while these canvases are
+    // still unmounted. Paint both whenever either side changes.
     useEffect(() => {
         paint(sourceRef.current, model.source);
         paint(matteRef.current, model.frame);
