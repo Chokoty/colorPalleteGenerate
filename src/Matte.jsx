@@ -17,11 +17,8 @@ export function MatteStage({ model }) {
 
     useEffect(() => {
         paint(sourceRef.current, model.source);
-    }, [model.source]);
-
-    useEffect(() => {
         paint(matteRef.current, model.frame);
-    }, [model.frame]);
+    }, [model.source, model.frame]);
 
     if (!model.frame?.rgba) {
         return <p className="render-wait">{model.error || "매트로 바꾸는 중"}</p>;
