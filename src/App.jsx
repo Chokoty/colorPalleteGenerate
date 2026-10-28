@@ -9,6 +9,7 @@ import {
     recolorPixel,
     rgbToLab,
 } from "./imagePalette";
+import { extractRgbxyPaletteFromImageData } from "./rgbxyPalette";
 import { gradientEdges } from "./imageOutline";
 import { extractLineArt } from "./lineartModel";
 import { StudyControls, StudyLayers, StudyStage, StudySummary, StudyTools } from "./ColorStudy";
@@ -404,6 +405,8 @@ function App() {
     const [clusterCount, setClusterCount] = useState(6);
     const [opaqueShares, setOpaqueShares] = useState([]);
     const [deltaEStop, setDeltaEStop] = useState(DELTA_E_STOP);
+    const [autoMethod, setAutoMethod] = useState("peaks");
+    const [rgbxyRmse, setRgbxyRmse] = useState(0);
     const [showConvexHull, setShowConvexHull] = useState(true);
     const [distTab, setDistTab] = useState("rgb");
     const [hsvShape, setHsvShape] = useState("cone");
@@ -471,6 +474,7 @@ function App() {
     const manualSamplesRef = useRef(null);
     const manualCountRef = useRef(6);
     const modeRef = useRef("auto");
+    const autoMethodRef = useRef("peaks");
     const study = useColorStudy(imageRef, uploadId, mode === "study");
     const renderLayers = useRenderLayers(imageRef, uploadId, mode === "layers");
     const [replayOpen, setReplayOpen] = useState(false);
@@ -623,14 +627,25 @@ function App() {
 
     const runAuto = (stored, nextColor, nextSpatial) => {
         const { data, width, height } = stored;
-        const extracted = extractPaletteFromImageData(data);
-        console.log(
-            `Image size: ${width}x${height}, preview colors: ${extracted.uniqueColors.length}`
-        );
-        console.log(
-            `In-image palette (${extracted.palette.length} colors, max ΔE ${extracted.maxDeltaE.toFixed(1)} / stop ${extracted.deltaEStop}):`,
-            extracted.palette
-        );
+        const useRgbxy = autoMethodRef.current === "rgbxy";
+        const extracted = useRgbxy
+            ? extractRgbxyPaletteFromImageData(data, width, height)
+            : extractPaletteFromImageData(data);
+        if (useRgbxy) {
+            setRgbxyRmse(extracted.finalRmse);
+            console.log(
+                `RGBXY palette (${extracted.palette.length} colors, RMSE ${extracted.finalRmse.toFixed(2)} / ${2}):`,
+                extracted.palette
+            );
+        } else {
+            console.log(
+                `Image size: ${width}x${height}, preview colors: ${extracted.uniqueColors.length}`
+            );
+            console.log(
+                `In-image palette (${extracted.palette.length} colors, max ΔE ${extracted.maxDeltaE.toFixed(1)} / stop ${extracted.deltaEStop}):`,
+                extracted.palette
+            );
+        }
         const palette = paletteCenters(extracted.palette);
         if (palette.length === 0) {
             clusterIdsRef.current = null;
@@ -638,7 +653,7 @@ function App() {
             setOpaqueShares([]);
             setClusterPositions([]);
             setLayerImages([]);
-            setDeltaEStop(extracted.deltaEStop);
+            if (!useRgbxy) setDeltaEStop(extracted.deltaEStop);
             return;
         }
         const centers = centersWithPicks(palette, pickedPointsRef.current, width, height);
@@ -653,7 +668,7 @@ function App() {
         setColorVisible(colorVisibleRef.current);
         colorOpacityRef.current = centers.map(() => 100);
         setColorOpacity(colorOpacityRef.current);
-        setDeltaEStop(extracted.deltaEStop);
+        if (!useRgbxy) setDeltaEStop(extracted.deltaEStop);
         const stats = clusterStats(data, width, height, ids, centers);
         setOpaqueShares(stats.shares);
         setClusterPositions(stats.positions);
@@ -663,6 +678,14 @@ function App() {
         if (!stored) return;
         if (nextMode === "manual") runManual(stored, count, nextColor, nextSpatial);
         else runAuto(stored, nextColor, nextSpatial);
+    };
+
+    const chooseAutoMethod = (next) => {
+        if (next === autoMethodRef.current) return;
+        autoMethodRef.current = next;
+        setAutoMethod(next);
+        if (modeRef.current !== "auto" || !imageRef.current) return;
+        runAuto(imageRef.current, colorWeight, spatialWeight);
     };
 
     const loadImageFile = (file, source = "upload") => {
@@ -1582,6 +1605,29 @@ function App() {
                             disabled={isLoadingImage}
                         />
                     </div>
+                    {mode === "auto" && (
+                        <div className="auto-method" role="group" aria-label="자동 추출 방식">
+                            <p className="region-sub">자동으로 고르는 방법</p>
+                            <div className="button-row">
+                                <button
+                                    type="button"
+                                    className="mode-tab"
+                                    aria-pressed={autoMethod === "peaks"}
+                                    onClick={() => chooseAutoMethod("peaks")}
+                                >
+                                    있는 색
+                                </button>
+                                <button
+                                    type="button"
+                                    className="mode-tab"
+                                    aria-pressed={autoMethod === "rgbxy"}
+                                    onClick={() => chooseAutoMethod("rgbxy")}
+                                >
+                                    RGBXY
+                                </button>
+                            </div>
+                        </div>
+                    )}
                     {mode === "manual" && (
                         <form
                             className="settings-panel"
@@ -1821,8 +1867,13 @@ function App() {
                                     {imageData && mode !== "study" && mode !== "layers" && clusters.length > 0 && (
                                         <div className="palette-summary">
                                             <div className="stat-count">색 {clusters.length}개</div>
-                                            {mode === "auto" && (
+                                            {mode === "auto" && autoMethod === "peaks" && (
                                                 <div className="stat-sub">비슷한 색은 한 칸으로 묶었습니다.</div>
+                                            )}
+                                            {mode === "auto" && autoMethod === "rgbxy" && (
+                                                <div className="stat-sub">
+                                                    RGBXY 껍질에서 다시 칠 오차 {rgbxyRmse.toFixed(2)} / 2 로 멈췄습니다.
+                                                </div>
                                             )}
                                             {isUpdating && <p className="stat-sub">색을 다시 칠하는 중</p>}
                                         </div>
