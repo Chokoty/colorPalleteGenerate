@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node scripts/check-src.mjs && node --test \"src/**/*.test.js\""
+    "test": "node scripts/check-src.mjs && node scripts/run-unit-tests.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.0.4",

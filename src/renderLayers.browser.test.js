@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import test from "node:test";
 
 const APP = "http://127.0.0.1:5173/";
+const CHROME = process.env.CHROME_PATH || "/usr/local/bin/google-chrome";
 const PORT = 9337;
 const NOISE = [/devtools/i, /\[vite\]/i, /webgpu/i, /adapter/i, /lineart/i, /webgl/i, /onnx/i, /favicon/i, /wasm/i];
 
@@ -73,7 +74,7 @@ test("texture toggles, random edits, and view modes keep one status and restore 
         }
     }, 60000, "dev server");
     const chrome = spawn(
-        "/usr/local/bin/google-chrome",
+        CHROME,
         [
             "--headless=new",
             "--disable-gpu",
