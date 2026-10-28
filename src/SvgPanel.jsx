@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { constructionOpacity, drawnToSvg, measureError, TRACE_MAX_SIDE, trace } from "./drawnTrace.js";
+import { constructionOpacity, measureError, TRACE_MAX_SIDE, trace } from "./drawnTrace.js";
 import { fitPixels } from "./picture.js";
 import { PlaybackBar } from "./ui/PlaybackBar";
 import { ReplayChrome } from "./ui/ReplayChrome";
@@ -190,11 +190,8 @@ export default function SvgPanel({
             run.promise
                 .then((result) => {
                     if (cancelled || id !== runId.current) return;
-                    const doc = drawnToSvg(result);
                     setPicture({
                         ...result,
-                        bytes: doc.bytes,
-                        pathCount: doc.pathCount,
                         ms: Math.round(performance.now() - started),
                     });
                     setShown(result.layers.length);
@@ -281,7 +278,7 @@ export default function SvgPanel({
 
     const save = (animated) => {
         if (!picture) return;
-        const doc = drawnToSvg(picture, { animated, speed });
+        const doc = picture.render({ animated, speed });
         downloadText(animated ? `${stem}-animated.svg` : `${stem}.svg`, doc.svg);
     };
 

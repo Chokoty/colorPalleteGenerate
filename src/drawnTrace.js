@@ -1126,7 +1126,7 @@ async function buildDrawnTrace({
     return { width, height, batches, layers };
 }
 
-export function drawnToSvg(trace, options = {}) {
+function renderDrawnSvg(trace, options = {}) {
     const animated = Boolean(options.animated);
     const speed = Math.min(2, Math.max(0.1, options.speed || 1));
     const layers = trace.layers || [];
@@ -1181,6 +1181,19 @@ export function drawnToSvg(trace, options = {}) {
     return { svg, bytes: new TextEncoder().encode(svg).length, pathCount };
 }
 
+function sealTrace(result) {
+    const doc = renderDrawnSvg(result);
+    result.svg = doc.svg;
+    result.bytes = doc.bytes;
+    result.pathCount = doc.pathCount;
+    result.render = (options) => renderDrawnSvg(result, options);
+    return result;
+}
+
+export function drawnToSvg() {
+    throw new Error("SVG traces picture.original only");
+}
+
 function traceInput(picture, detail, colorCount, ink) {
     const data = traceSource(picture);
     const fitted = fitPixels(data, picture.width, picture.height, TRACE_MAX_SIDE);
@@ -1198,11 +1211,11 @@ function traceInput(picture, detail, colorCount, ink) {
 // A raw pixel buffer is not a picture, so traceSource rejects it.
 export async function completeTrace(picture, traceSvg, onProgress) {
     const input = traceInput(picture, picture?.detail ?? 64, picture?.colorCount ?? 8, picture?.ink);
-    return buildDrawnTrace({
+    return sealTrace(await buildDrawnTrace({
         ...input,
         traceSvg,
         onProgress,
-    });
+    }));
 }
 
 function inTraceWorker() {
@@ -1292,7 +1305,7 @@ export function trace(picture, options = {}) {
             ...input,
             traceSvg: options.traceSvg,
             onProgress: options.onProgress,
-        });
+        }).then(sealTrace);
         return {
             source: input.data,
             promise,
@@ -1300,5 +1313,5 @@ export function trace(picture, options = {}) {
         };
     }
     const run = traceWithWorker(input, options.onProgress);
-    return { source: input.data, promise: run.promise, stop: run.stop };
+    return { source: input.data, promise: run.promise.then(sealTrace), stop: run.stop };
 }

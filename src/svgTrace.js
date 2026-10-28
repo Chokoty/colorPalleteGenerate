@@ -277,7 +277,7 @@ export function eraseSmallIslands(mask, width, height, minArea) {
     return mask;
 }
 
-export function traceFilledMask(mask, width, height, epsilon, minArea = 0) {
+function traceFilledMaskImpl(mask, width, height, epsilon, minArea = 0) {
     const floor = Math.max(1, minArea);
     const groups = connectedComponents(mask, width, height, floor);
     const work = new Uint8Array(mask.length);
@@ -300,6 +300,10 @@ export function traceFilledMask(mask, width, height, epsilon, minArea = 0) {
         if (contours.length) components.push({ area: pixels.length, contours });
     }
     return components;
+}
+
+export function traceFilledMask() {
+    throw new Error("SVG traces picture.original only");
 }
 
 export function limitLabels(labels, colors, colorCount) {
@@ -733,7 +737,7 @@ export function buildVectorLayers(job) {
         const color = colors[slot];
         const mask = maskFor(sampled.labels, sampled.width, sampled.height, slot, null, 0);
         if (!mask) continue;
-        const paths = traceFilledMask(mask, sampled.width, sampled.height, eps, minTrace);
+        const paths = traceFilledMaskImpl(mask, sampled.width, sampled.height, eps, minTrace);
         const split = splitComponents(paths, detailTrace);
         const hex = color.hex || rgbToHex255(color.rgb);
         if (split.big.length) layers.push(makeFillLayer("base", hex, split.big, sx, sy));
@@ -741,7 +745,7 @@ export function buildVectorLayers(job) {
         if (job.mass && color.shadow) {
             const shadowMask = maskFor(sampled.labels, sampled.width, sampled.height, slot, sampled.mass, 1);
             if (shadowMask) {
-                const shadowPaths = traceFilledMask(
+                const shadowPaths = traceFilledMaskImpl(
                     shadowMask,
                     sampled.width,
                     sampled.height,
@@ -764,7 +768,7 @@ export function buildVectorLayers(job) {
         if (job.mass && color.light) {
             const lightMask = maskFor(sampled.labels, sampled.width, sampled.height, slot, sampled.mass, 2);
             if (lightMask) {
-                const lightPaths = traceFilledMask(
+                const lightPaths = traceFilledMaskImpl(
                     lightMask,
                     sampled.width,
                     sampled.height,
@@ -875,64 +879,8 @@ function layerGroup(layer, extra = "") {
     return `${open}${title}<path d="${layer.d}" fill="${layer.hex}" fill-rule="evenodd"/></g>`;
 }
 
-export function layersToSvg(layers, width, height, options = {}) {
-    const animated = Boolean(options.animated);
-    const speed = Math.min(2, Math.max(0.1, options.speed || 1));
-    const parts = [
-        `<?xml version="1.0" encoding="UTF-8"?>`,
-        `<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:i="http://ns.adobe.com/AdobeIllustrator/10.0/" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">`,
-    ];
-    if (animated) {
-        const fade = (0.42 / speed).toFixed(3);
-        const draw = (0.9 / speed).toFixed(3);
-        const gap = 0.06 / speed;
-        let time = 0.04;
-        const rules = [];
-        for (let i = 0; i < layers.length; i++) {
-            const layer = layers[i];
-            const isStroke = layer.kind === "stroke";
-            const dur = isStroke ? draw : fade;
-            const delay = time.toFixed(3);
-            if (isStroke) {
-                rules.push(
-                    `#${cssEscape(layer.id)} path{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);animation:svg-draw ${dur}s ease ${delay}s forwards}`
-                );
-            } else {
-                rules.push(
-                    `#${cssEscape(layer.id)}{opacity:0;animation:svg-reveal ${dur}s ease ${delay}s forwards}`
-                );
-            }
-            time += Number(dur) + gap;
-        }
-        parts.push(
-            `<style>@keyframes svg-reveal{to{opacity:1}}@keyframes svg-draw{to{stroke-dashoffset:0}}${rules.join("")}@media (prefers-reduced-motion: reduce){g{animation:none!important;opacity:1!important}path{animation:none!important;stroke-dashoffset:0!important}}</style>`
-        );
-    }
-    for (let i = 0; i < layers.length; i++) {
-        const layer = layers[i];
-        if (animated && layer.kind === "stroke") {
-            const paths = layer.d
-                .map((d, index) => {
-                    const len = (layer.lengths[index] || 0).toFixed(1);
-                    return `<path style="--len:${len}" d="${d}" fill="none" stroke="${layer.hex}" stroke-width="${layer.strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/>`;
-                })
-                .join("");
-            const name = escapeXml(layer.name);
-            const id = escapeXml(layer.id);
-            parts.push(
-                `<g id="${id}" data-name="${name}" inkscape:label="${name}" inkscape:groupmode="layer" i:layer="yes"><title>${name}</title>${paths}</g>`
-            );
-        } else {
-            parts.push(layerGroup(layer));
-        }
-    }
-    parts.push(`</svg>`);
-    const svg = parts.join("");
-    return {
-        svg,
-        bytes: svgByteSize(svg),
-        pathCount: countPaths(layers),
-    };
+export function layersToSvg() {
+    throw new Error("SVG traces picture.original only");
 }
 
 function cssEscape(id) {

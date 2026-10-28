@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { completeTrace, trace } from "./drawnTrace.js";
+import { completeTrace, drawnToSvg, trace } from "./drawnTrace.js";
 import { derivedPicture, pictureFromPixels, traceSource } from "./picture.js";
-import { buildVectorLayers } from "./svgTrace.js";
+import { buildVectorLayers, layersToSvg, traceFilledMask } from "./svgTrace.js";
 
 function solid(width, height, rgb) {
     const data = new Uint8ClampedArray(width * height * 4);
@@ -80,4 +80,25 @@ test("completeTrace and buildVectorLayers reject arbitrary pixels", async () => 
     const traced = await completeTrace(picture, () => "<svg></svg>");
     assert.equal(traced.width, width);
     assert.equal(traced.height, height);
+    assert.match(traced.svg, /<svg/);
+});
+
+test("a fabricated trace, mask, and layers are rejected", () => {
+    const fabricatedTrace = {
+        width: 2,
+        height: 2,
+        layers: [{ id: "made", role: "flat", paths: [{ d: "M0 0 L2 0 L2 2 Z", fill: "#ff00ff" }] }],
+    };
+    assert.throws(() => drawnToSvg(fabricatedTrace), /picture\.original/);
+    const mask = new Uint8Array(4);
+    mask.fill(1);
+    assert.throws(() => traceFilledMask(mask, 2, 2, 0.5, 1), /picture\.original/);
+    assert.throws(
+        () => layersToSvg(
+            [{ id: "made", name: "made", kind: "fill", hex: "#ff00ff", d: "M0 0 L2 0 L2 2 Z", paths: [[]], lengths: [] }],
+            2,
+            2
+        ),
+        /picture\.original/
+    );
 });

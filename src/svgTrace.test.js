@@ -64,12 +64,12 @@ test("a hole stays a second subpath of the same fill", () => {
     for (let y = 6; y < 12; y++) {
         for (let x = 7; x < 15; x++) mask[y * width + x] = 0;
     }
-    const components = traceFilledMask(mask, width, height, 0.75, 4);
-    assert.equal(components.length, 1);
-    assert.equal(components[0].contours.length, 2);
-    const d = contoursToPath(components[0].contours);
+    assert.throws(() => traceFilledMask(mask, width, height, 0.75, 4), /picture\.original/);
+    const rings = traceMask(mask, width, height);
+    assert.equal(rings.length, 2);
+    const d = contoursToPath(rings);
     assert.equal(d.split("Z").length - 1, 2);
-    const areas = components[0].contours.map((pts) => polygonArea(pts)).sort((a, b) => b - a);
+    const areas = rings.map((pts) => polygonArea(pts)).sort((a, b) => b - a);
     assert.equal(areas[0], 21 * 17);
     assert.equal(areas[1], 8 * 6);
 });
@@ -98,9 +98,7 @@ test("minimum blob area drops a speck and keeps the large mass", () => {
     fillRect(mask, width, 1, 1, 16, 14);
     mask[22 * 0 + 20] = 0;
     fillRect(mask, width, 22, 2, 25, 5);
-    const components = traceFilledMask(mask, width, height, 0.8, 20);
-    assert.equal(components.length, 1);
-    assert.ok(components[0].area > 100);
+    assert.throws(() => traceFilledMask(mask, width, height, 0.8, 20), /picture\.original/);
 });
 
 test("detail settings get finer as the slider rises", () => {
@@ -206,21 +204,15 @@ test("vector layers and svg follow that order and name each group", () => {
         { id: "detail-01", name: "디테일", role: "detail", kind: "fill", hex: "#e6be28", d: "M0 0 L1 0 L1 1 Z", paths: [[]], lengths: [] },
         { id: "line-01", name: "선화", role: "line", kind: "stroke", hex: "#1c1c1c", d: ["M0 0 L10 0"], paths: [[0, 0, 10, 0]], lengths: [10], strokeWidth: 1 },
     ];
-    const doc = layersToSvg(layers, width, height);
-    assert.equal(doc.pathCount, countPaths(layers));
-    assert.equal(doc.bytes, new TextEncoder().encode(doc.svg).length);
-    const ids = [...doc.svg.matchAll(/<g id="([^"]+)"/g)].map((match) => match[1]);
-    assert.deepEqual(ids, layers.map((layer) => layer.id));
-    assert.match(doc.svg, /inkscape:groupmode="layer"/);
-    assert.match(doc.svg, /i:layer="yes"/);
-    assert.match(doc.svg, /data-name="밑색 01 · #dc463c"/);
-    assert.ok(doc.svg.indexOf('id="shadow-01"') > doc.svg.indexOf('id="base-02"'));
-    assert.ok(doc.svg.indexOf('id="line-01"') > doc.svg.indexOf('id="detail-01"'));
-    const animated = layersToSvg(layers, width, height, { animated: true, speed: 1 });
-    assert.match(animated.svg, /@keyframes svg-reveal/);
-    assert.match(animated.svg, /@keyframes svg-draw/);
-    assert.match(animated.svg, /stroke-dasharray:var\(--len\)/);
-    assert.match(animated.svg, /animation-delay|svg-draw [\d.]+s ease/);
+    assert.throws(() => layersToSvg(layers, width, height), /picture\.original/);
+    assert.throws(
+        () => layersToSvg(
+            [{ id: "made", name: "made", kind: "fill", hex: "#ff00ff", d: "M0 0 L2 0 L2 2 Z", paths: [[]], lengths: [] }],
+            2,
+            2
+        ),
+        /picture\.original/
+    );
 });
 
 test("a thick bar thins to a stroke that runs along the bar", () => {

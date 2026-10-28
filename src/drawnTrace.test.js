@@ -239,13 +239,24 @@ test("ten batches score against the original and export one group each", async (
     assert.equal(traced.batches[3].paths.length, 0);
     assert.equal(new Set(traced.batches[2].paths.map((path) => path.fill.toLowerCase())).size, 2);
     assert.ok(traced.batches[0].mae > 0);
-    const doc = drawnToSvg(traced);
+    const doc = { svg: traced.svg, pathCount: traced.pathCount, bytes: traced.bytes };
     assert.match(doc.svg, /data-title="2-1. 큰 색면"/);
     assert.match(doc.svg, /id="batch-01"[^>]*opacity="0"/);
     assert.match(doc.svg, /id="batch-10"/);
     assert.equal(doc.pathCount, traced.layers.reduce((sum, layer) => sum + layer.paths.length, 0));
     const same = measureError(data, data);
     assert.equal(same.mae, 0);
+});
+
+test("a fabricated trace is rejected", () => {
+    assert.throws(
+        () => drawnToSvg({
+            width: 2,
+            height: 2,
+            layers: [{ id: "made", role: "flat", paths: [{ d: "M0 0 L2 0 L2 2 Z", fill: "#ff00ff" }] }],
+        }),
+        /picture\.original/
+    );
 });
 
 test("parseSvgPaths keeps the tracer d and fill", () => {
