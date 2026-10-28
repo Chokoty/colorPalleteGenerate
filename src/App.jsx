@@ -21,6 +21,7 @@ import { useRenderLayers } from "./useRenderLayers";
 import { ReplayChrome } from "./ui/ReplayChrome";
 import { addPick, centersWithPicks, pickAt, removePick, restorePicks, rgb01ToHex } from "./pickedColors";
 import { tintedShadowPixel } from "./shadowTint";
+import { loadPictureFile } from "./picture.js";
 
 // Main-branch extraction: the user picks k, and centers are k-means means
 // of sampled RGB+XY points. Recolor fills each pixel with its center.
@@ -490,7 +491,7 @@ function App() {
         if (!canvasRef.current || !stored || !ids || centers.length === 0) return;
         try {
         const paintBody = () => {
-        const { data, width, height } = stored;
+        const { original: data, width, height } = stored;
         const canvas = canvasRef.current;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
@@ -567,7 +568,7 @@ function App() {
     };
 
     const runManual = (stored, count, nextColor, nextSpatial) => {
-        const { data, width, height } = stored;
+        const { original: data, width, height } = stored;
         let sampled = manualSamplesRef.current;
         if (!sampled) {
             const collected = collectColorSample(data, width, height);
@@ -622,7 +623,7 @@ function App() {
     };
 
     const runAuto = (stored, nextColor, nextSpatial) => {
-        const { data, width, height } = stored;
+        const { original: data, width, height } = stored;
         const extracted = extractPaletteFromImageData(data);
         console.log(
             `Image size: ${width}x${height}, preview colors: ${extracted.uniqueColors.length}`
@@ -673,97 +674,65 @@ function App() {
         }
         const serial = ++loadSerialRef.current;
         setIsLoadingImage(true);
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const img = new Image();
-            img.onload = () => {
+        loadPictureFile(file, { source: source === "upload" ? "upload" : "sample" })
+            .then(({ picture, canvas }) => {
                 if (serial !== loadSerialRef.current) return;
-                try {
-                    if (!img.width || !img.height) {
-                        setLoadError("이미지를 읽지 못했습니다.");
-                        setIsLoadingImage(false);
-                        return;
-                    }
-                    // One canvas, long side 2000. A camera original (often past
-                    // 4096px) is what iOS Safari refuses, and the page only
-                    // ever shows the picture at 640px tall.
-                    const fitted = fitInside(img.width, img.height, 2000);
-                    const canvas = document.createElement("canvas");
-                    canvas.width = fitted.width;
-                    canvas.height = fitted.height;
-                    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-                    if (!ctx) throw new Error("2d context unavailable");
-                    ctx.drawImage(img, 0, 0, fitted.width, fitted.height);
-                    const decoded = ctx.getImageData(0, 0, fitted.width, fitted.height);
-                    canvasRef.current = canvas;
-                    manualSamplesRef.current = null;
-                    clusterIdsRef.current = null;
-                    const stored = {
-                        data: new Uint8ClampedArray(decoded.data),
-                        width: fitted.width,
-                        height: fitted.height,
-                    };
-                    imageRef.current = stored;
-                    previewRef.current = stored;
-                    inkCacheRef.current = null;
-                    lineArtVisibleRef.current = false;
-                    soloRef.current = null;
-                    colorVisibleRef.current = [];
-                    pickedPointsRef.current = [];
-                    pickSerialRef.current = 0;
-                    setPickedPoints([]);
-                    setLineArtVisible(false);
-                    setColorVisible([]);
-                    setLineThumb(null);
-                    setLineArtThumb(null);
-                    setSolo(null);
-                    setCenterTab("recolor");
-                    setImageData(canvas.toDataURL());
-                    setUploadId((id) => id + 1);
-                    setLoadError(null);
-                    setImageInfo({
-                        name: file.name,
-                        size: file.size,
-                        type: file.type,
-                        width: img.width,
-                        height: img.height,
-                    });
-                    setActiveSampleId(source === "upload" ? null : source);
-                    if (modeRef.current === "layers") {
-                        setClusters([]);
-                        setLayerImages([]);
-                    } else if (modeRef.current !== "study") {
-                        runCurrent(
-                            stored,
-                            modeRef.current,
-                            colorWeight,
-                            spatialWeight,
-                            manualCountRef.current
-                        );
-                    }
-                    setIsLoadingImage(false);
-                } catch (error) {
-                    if (serial !== loadSerialRef.current) return;
-                    console.error(error);
+                canvasRef.current = canvas;
+                manualSamplesRef.current = null;
+                clusterIdsRef.current = null;
+                imageRef.current = picture;
+                previewRef.current = picture;
+                inkCacheRef.current = null;
+                lineArtVisibleRef.current = false;
+                soloRef.current = null;
+                colorVisibleRef.current = [];
+                pickedPointsRef.current = [];
+                pickSerialRef.current = 0;
+                setPickedPoints([]);
+                setLineArtVisible(false);
+                setColorVisible([]);
+                setLineThumb(null);
+                setLineArtThumb(null);
+                setSolo(null);
+                setCenterTab("recolor");
+                setImageData(picture.previewUrl);
+                setUploadId((id) => id + 1);
+                setLoadError(null);
+                setImageInfo({
+                    name: picture.name,
+                    size: picture.bytes,
+                    type: picture.type,
+                    width: picture.fileWidth,
+                    height: picture.fileHeight,
+                });
+                setActiveSampleId(source === "upload" ? null : source);
+                if (modeRef.current === "layers") {
+                    setClusters([]);
+                    setLayerImages([]);
+                } else if (modeRef.current !== "study") {
+                    runCurrent(
+                        picture,
+                        modeRef.current,
+                        colorWeight,
+                        spatialWeight,
+                        manualCountRef.current
+                    );
+                }
+                setIsLoadingImage(false);
+            })
+            .catch((error) => {
+                if (serial !== loadSerialRef.current) return;
+                console.error(error);
+                const message = error && error.message;
+                if (message === "이미지를 읽지 못했습니다.") {
+                    setLoadError(message);
+                } else {
                     setClusters([]);
                     setLayerImages([]);
                     setLoadError("이미지를 처리하지 못했습니다.");
-                    setIsLoadingImage(false);
                 }
-            };
-            img.onerror = () => {
-                if (serial !== loadSerialRef.current) return;
-                setLoadError("이미지를 읽지 못했습니다.");
                 setIsLoadingImage(false);
-            };
-            img.src = e.target.result;
-        };
-        reader.onerror = () => {
-            if (serial !== loadSerialRef.current) return;
-            setLoadError("이미지를 읽지 못했습니다.");
-            setIsLoadingImage(false);
-        };
-        reader.readAsDataURL(file);
+            });
     };
 
     const handleImageUpload = (event) => {
@@ -857,7 +826,7 @@ function App() {
         }
         setClusters(newClusters);
         if (imageRef.current && clusterIdsRef.current) {
-            const { data, width, height } = imageRef.current;
+            const { original: data, width, height } = imageRef.current;
             const stats = clusterStats(data, width, height, clusterIdsRef.current, newClusters);
             setOpaqueShares(stats.shares);
             setClusterPositions(stats.positions);
@@ -890,7 +859,7 @@ function App() {
             newClusters[index] = { ...current, rgb };
             setClusters(newClusters);
             if (imageRef.current && clusterIdsRef.current) {
-                const { data, width, height } = imageRef.current;
+                const { original: data, width, height } = imageRef.current;
                 const stats = clusterStats(data, width, height, clusterIdsRef.current, newClusters);
                 setOpaqueShares(stats.shares);
                 setClusterPositions(stats.positions);
@@ -906,7 +875,7 @@ function App() {
         newClusters[index] = { ...newClusters[index], rgb: [...orig[index].rgb] };
         setClusters(newClusters);
         if (imageRef.current && clusterIdsRef.current) {
-            const { data, width, height } = imageRef.current;
+            const { original: data, width, height } = imageRef.current;
             const stats = clusterStats(data, width, height, clusterIdsRef.current, newClusters);
             setOpaqueShares(stats.shares);
             setClusterPositions(stats.positions);
@@ -933,7 +902,7 @@ function App() {
             : orig.map((c) => ({ ...c, rgb: [...c.rgb] }));
         setClusters(newClusters);
         if (imageRef.current && clusterIdsRef.current) {
-            const { data, width, height } = imageRef.current;
+            const { original: data, width, height } = imageRef.current;
             const stats = clusterStats(data, width, height, clusterIdsRef.current, newClusters);
             setOpaqueShares(stats.shares);
             setClusterPositions(stats.positions);
@@ -966,7 +935,7 @@ function App() {
                 return;
             }
             if (clusterIdsRef.current && canvasRef.current) {
-                const { data, width, height } = imageRef.current;
+                const { original: data, width, height } = imageRef.current;
                 assignLabIds(
                     data,
                     width,
@@ -995,9 +964,9 @@ function App() {
         const centers = centersWithPicks(extracted, nextPicks, stored.width, stored.height);
         const ids = idsFor(stored);
         if (modeRef.current === "manual") {
-            assignRgbIds(stored.data, stored.width, stored.height, centers, colorWeight, spatialWeight, ids);
+            assignRgbIds(stored.original, stored.width, stored.height, centers, colorWeight, spatialWeight, ids);
         } else {
-            assignLabIds(stored.data, stored.width, stored.height, centers, colorWeight, spatialWeight, ids, false);
+            assignLabIds(stored.original, stored.width, stored.height, centers, colorWeight, spatialWeight, ids, false);
         }
         const oldCenters = clustersRef.current;
         const prevVisible = colorVisibleRef.current;
@@ -1020,7 +989,7 @@ function App() {
         setColorOpacity(opacity);
         clustersRef.current = centers;
         setClusters(centers);
-        const stats = clusterStats(stored.data, stored.width, stored.height, ids, centers);
+        const stats = clusterStats(stored.original, stored.width, stored.height, ids, centers);
         setOpaqueShares(stats.shares);
         setClusterPositions(stats.positions);
         updateCanvasAndLayers(centers);
@@ -1038,7 +1007,7 @@ function App() {
         if (relX < 0 || relY < 0 || relX > 1 || relY > 1) return;
         const x = Math.min(stored.width - 1, Math.max(0, Math.floor(relX * stored.width)));
         const y = Math.min(stored.height - 1, Math.max(0, Math.floor(relY * stored.height)));
-        const pick = pickAt(stored.data, stored.width, stored.height, x, y, `pick-${pickSerialRef.current + 1}`);
+        const pick = pickAt(stored.original, stored.width, stored.height, x, y, `pick-${pickSerialRef.current + 1}`);
         if (!pick) return;
         const extracted = clustersRef.current.filter((center) => center && !center.pickId);
         const next = addPick(
@@ -1158,7 +1127,7 @@ function App() {
 
         for (let p = 0; p < ids.length; p++) {
             const offset = p * 4;
-            const origAlpha = stored.data[offset + 3];
+            const origAlpha = stored.original[offset + 3];
             if (origAlpha === 0) continue;
 
             const cluster = ids[p];
@@ -1173,7 +1142,7 @@ function App() {
                 if (layerOp <= 0) continue;
 
                 const shadeHere = soloNow?.kind === "color" ? false : soloNow?.kind === "shade" ? true : isShadingOn;
-                const color = paintedChannels(stored.data, p, center, shadeHere, shadowTintRef.current);
+                const color = paintedChannels(stored.original, p, center, shadeHere, shadowTintRef.current);
                 let finalR = color[0];
                 let finalG = color[1];
                 let finalB = color[2];
@@ -1216,7 +1185,7 @@ function App() {
 
         const drawLines = soloNow ? soloNow.kind === "lines" : showLinesRef.current;
         if (drawLines) {
-            const edges = gradientEdges(stored.data, width, height);
+            const edges = gradientEdges(stored.original, width, height);
             for (let i = 0; i < edges.length; i++) {
                 if (!edges[i]) continue;
                 const offset = i * 4;
@@ -1236,7 +1205,7 @@ function App() {
 
         const art = inkCacheRef.current;
         const drawInk = soloNow ? soloNow.kind === "ink" : lineArtVisibleRef.current;
-        if (drawInk && art && art.source === stored.data) {
+        if (drawInk && art && art.source === stored.original) {
             const inkOp = (lineArtOpacityRef.current ?? 100) / 100;
             const ink = art.art.rgba;
             if (inkOp > 0) {
@@ -1275,17 +1244,17 @@ function App() {
         const preview = previewRef.current;
         if (!preview) return;
         const cached = inkCacheRef.current;
-        if (cached && cached.source === preview.data) {
+        if (cached && cached.source === preview.original) {
             setInkNote("");
             setLineArtThumb(lineArtThumbnail(cached.art));
             return;
         }
         const request = ++inkRequestRef.current;
         setInkNote("선화를 추출하는 중");
-        extractLineArt(preview.data, preview.width, preview.height)
+        extractLineArt(preview.original, preview.width, preview.height)
             .then((art) => {
                 if (request !== inkRequestRef.current) return;
-                inkCacheRef.current = { source: preview.data, art };
+                inkCacheRef.current = { source: preview.original, art };
                 setLineArtThumb(lineArtThumbnail(art));
                 setInkNote("");
             })
@@ -1304,7 +1273,7 @@ function App() {
         const stored = imageRef.current;
         if (!stored) return;
         try {
-            const small = downscaleImage(stored.data, stored.width, stored.height, 180);
+            const small = downscaleImage(stored.original, stored.width, stored.height, 180);
             const edges = gradientEdges(small.data, small.width, small.height);
             setLineThumb(strokeThumbnail(edges, small.width, small.height));
         } catch (error) {

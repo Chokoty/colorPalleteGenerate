@@ -1,4 +1,5 @@
 import { oklabToSrgb, srgbToOklab } from "./colorStudy.js";
+import { fitPixels, traceSource } from "./picture.js";
 import { lineToPath, polygonArea, polylineLength, resizeMask, simplifyClosed, simplifyOpen, skeletonPolylines } from "./svgTrace.js";
 
 // Ten drawing stages, in paint order. The shape is the domain:
@@ -1041,7 +1042,7 @@ function finishPaths(paths, epsilon, minArea, palette) {
     return out;
 }
 
-export async function buildDrawnTrace({
+async function buildDrawnTrace({
     data,
     width,
     height,
@@ -1178,4 +1179,92 @@ export function drawnToSvg(trace, options = {}) {
     const svg = parts.join("");
     const pathCount = layers.reduce((sum, layer) => sum + (layer.paths?.length || 0), 0);
     return { svg, bytes: new TextEncoder().encode(svg).length, pathCount };
+}
+
+function traceInput(picture, detail, colorCount, ink) {
+    const data = traceSource(picture);
+    const fitted = fitPixels(data, picture.width, picture.height, TRACE_MAX_SIDE);
+    return {
+        data: fitted.data,
+        width: fitted.width,
+        height: fitted.height,
+        detail,
+        colorCount,
+        ink: ink ?? null,
+    };
+}
+
+// Worker entry. The raw buffer stays in this module; the app calls trace(picture).
+export async function completeTrace(job, traceSvg, onProgress) {
+    return buildDrawnTrace({
+        data: job.data,
+        width: job.width,
+        height: job.height,
+        detail: job.detail,
+        colorCount: job.colorCount,
+        ink: job.ink,
+        traceSvg,
+        onProgress,
+    });
+}
+
+function traceWithWorker(input, onProgress) {
+    const worker = new Worker(new URL("./drawnTrace.worker.js", import.meta.url), { type: "module" });
+    let timer;
+    const promise = new Promise((resolve, reject) => {
+        timer = setTimeout(() => {
+            worker.terminate();
+            reject(new Error("trace timeout"));
+        }, 120000);
+        worker.onmessage = (event) => {
+            if (event.data?.type === "progress") {
+                onProgress?.(event.data);
+                return;
+            }
+            clearTimeout(timer);
+            worker.terminate();
+            if (event.data?.type === "error") reject(new Error(event.data.error || "trace failed"));
+            else resolve(event.data.result);
+        };
+        worker.onerror = (event) => {
+            clearTimeout(timer);
+            worker.terminate();
+            reject(new Error(event.message || "worker error"));
+        };
+        const copy = {
+            id: 1,
+            data: new Uint8ClampedArray(input.data),
+            width: input.width,
+            height: input.height,
+            detail: input.detail,
+            colorCount: input.colorCount,
+            ink: null,
+        };
+        worker.postMessage(copy, [copy.data.buffer]);
+    });
+    return {
+        promise,
+        stop() {
+            clearTimeout(timer);
+            worker.terminate();
+        },
+    };
+}
+
+export function trace(picture, options = {}) {
+    const input = traceInput(picture, options.detail ?? 64, options.colorCount ?? 8, options.ink);
+    if (typeof options.traceSvg === "function") {
+        const promise = buildDrawnTrace({
+            ...input,
+            traceSvg: options.traceSvg,
+            onProgress: options.onProgress,
+        });
+        return {
+            source: input.data,
+            promise,
+            stop() {},
+        };
+    }
+    const run = traceWithWorker(input, options.onProgress);
+    return { source: input.data, promise: run.promise, stop: run.stop };
 }

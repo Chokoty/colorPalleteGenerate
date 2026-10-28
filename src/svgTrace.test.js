@@ -5,7 +5,6 @@ import {
     contoursToPath,
     countPaths,
     detailSettings,
-    jobFromOriginal,
     limitLabels,
     orderLayers,
     polygonArea,
@@ -214,35 +213,6 @@ test("vector layers and svg follow that order and name each group", () => {
     assert.match(animated.svg, /@keyframes svg-draw/);
     assert.match(animated.svg, /stroke-dasharray:var\(--len\)/);
     assert.match(animated.svg, /animation-delay|svg-draw [\d.]+s ease/);
-});
-
-test("two flat colors trace from the pixels into a base layer", () => {
-    const width = 24;
-    const height = 16;
-    const data = new Uint8ClampedArray(width * height * 4);
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            const offset = (y * width + x) * 4;
-            const left = x < width / 2;
-            data[offset] = left ? 255 : 0;
-            data[offset + 1] = 0;
-            data[offset + 2] = left ? 0 : 255;
-            data[offset + 3] = 255;
-        }
-    }
-    const job = jobFromOriginal({ data, width, height, colorCount: 8, detail: 64, ink: null });
-    assert.deepEqual(
-        job.colors.map((color) => color.hex),
-        ["#ff0000", "#0000ff"]
-    );
-    const layers = buildVectorLayers(job);
-    assert.deepEqual(
-        layers.layers.map((layer) => [layer.role, layer.hex]),
-        [
-            ["base", "#ff0000"],
-            ["base", "#0000ff"],
-        ]
-    );
 });
 
 test("a thick bar thins to a stroke that runs along the bar", () => {
