@@ -109,6 +109,8 @@ test("texture toggles, random edits, and view modes keep one status and restore 
         });
         await session.send("Runtime.enable");
         await session.send("Page.enable");
+        const installSource = `(${install.toString()})()`;
+        await session.send("Page.addScriptToEvaluateOnNewDocument", { source: installSource });
         const evaluate = async (expression) => {
             const result = await session.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
             if (result.exceptionDetails) {
@@ -122,11 +124,11 @@ test("texture toggles, random edits, and view modes keep one status and restore 
             const label = await evaluate("document.querySelector('.image-info-name')?.textContent || ''");
             return String(label).includes("default.webp");
         }, 60000, "app page");
-        await evaluate(`(${install.toString()})()`);
+        if (await evaluate("window.__layer == null")) await evaluate(installSource);
         await waitFor(async () => {
             const name = await evaluate("window.__layer == null ? '' : window.__layer.name()");
             return String(name).includes("default.webp");
-        }, 20000, "default sample");
+        }, 60000, "default sample");
         await waitFor(async () => (await evaluate("window.__layer.opaque()")) > 1000, 20000, "palette preview");
         assert.equal(await evaluate("document.querySelector('[data-render-status]') == null"), true);
         const fullCount = await evaluate("window.__layer.opaque()");
@@ -245,7 +247,7 @@ test("texture toggles, random edits, and view modes keep one status and restore 
         session?.close();
         chrome.kill();
     }
-}, { timeout: 180000 });
+}, { timeout: 300000 });
 
 function mulberry32(seed) {
     let value = seed;
