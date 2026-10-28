@@ -1,3 +1,4 @@
+import { applyMatte } from "./matte.js";
 import {
     RENDER_LAYER_IDS,
     compositeRenderLayers,
@@ -68,7 +69,18 @@ self.onmessage = (event) => {
             );
             return;
         }
+        if (message.type === "matte") {
+            decomp = decomposeRenderLayers(new Uint8ClampedArray(message.rgba), message.width, message.height);
+            const rgba = applyMatte(decomp, message.amount);
+            self.postMessage(frameMessage(message.id, "matte", rgba), [rgba.buffer]);
+            return;
+        }
         if (!decomp) throw new Error("no decomposition");
+        if (message.type === "matte-amount") {
+            const rgba = applyMatte(decomp, message.amount);
+            self.postMessage(frameMessage(message.id, "matte", rgba), [rgba.buffer]);
+            return;
+        }
         if (message.type === "plate") {
             const plate = layerPlate(decomp, message.layerId);
             self.postMessage(frameMessage(message.id, "plate", plate), [plate.buffer]);

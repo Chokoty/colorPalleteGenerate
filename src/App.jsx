@@ -12,11 +12,13 @@ import {
 import { gradientEdges } from "./imageOutline";
 import { extractLineArt } from "./lineartModel";
 import { StudyControls, StudyLayers, StudyStage, StudySummary, StudyTools } from "./ColorStudy";
+import { MattePanel, MatteStage } from "./Matte";
 import { RenderLayerPanel, RenderLayerStage } from "./RenderLayers";
 import { StartGuide } from "./StartGuide";
 import { DEFAULT_SAMPLE, LAYER_SAMPLE, SAMPLES } from "./samples";
 import SvgPanel from "./SvgPanel";
 import { useColorStudy } from "./useColorStudy";
+import { useMatte } from "./useMatte";
 import { useRenderLayers } from "./useRenderLayers";
 import { ReplayChrome } from "./ui/ReplayChrome";
 import { addPick, centersWithPicks, pickAt, removePick, restorePicks, rgb01ToHex } from "./pickedColors";
@@ -29,6 +31,10 @@ import { tintedShadowPixel } from "./shadowTint";
 // still use the full unique-color sample.
 const MAX_UNIQUE_SAMPLES = 200000;
 const LAYER_PREVIEW_MAX = 480;
+
+function usesGlossSample(mode) {
+    return mode === "layers" || mode === "matte";
+}
 
 function collectColorSample(data, width, height) {
     const keys = [];
@@ -473,6 +479,7 @@ function App() {
     const modeRef = useRef("auto");
     const study = useColorStudy(imageRef, uploadId, mode === "study");
     const renderLayers = useRenderLayers(imageRef, uploadId, mode === "layers");
+    const matte = useMatte(imageRef, uploadId, mode === "matte");
     const [replayOpen, setReplayOpen] = useState(false);
     const [replayMenu, setReplayMenu] = useState(false);
     const [svgReplay, setSvgReplay] = useState(false);
@@ -729,7 +736,7 @@ function App() {
                         height: img.height,
                     });
                     setActiveSampleId(source === "upload" ? null : source);
-                    if (modeRef.current === "layers") {
+                    if (modeRef.current === "layers" || modeRef.current === "matte") {
                         setClusters([]);
                         setLayerImages([]);
                     } else if (modeRef.current !== "study") {
@@ -811,20 +818,22 @@ function App() {
 
     const switchMode = (nextMode) => {
         if (nextMode === "study") setStudyOpen(true);
-        if (nextMode === "layers") setCenterTab("recolor");
+        if (nextMode === "layers" || nextMode === "matte") setCenterTab("recolor");
         if (nextMode === modeRef.current) return;
         const previous = modeRef.current;
         modeRef.current = nextMode;
         setMode(nextMode);
-        if (nextMode === "layers" && activeSampleRef.current === DEFAULT_SAMPLE.id && LAYER_SAMPLE) {
+        const fromGloss = usesGlossSample(previous);
+        const toGloss = usesGlossSample(nextMode);
+        if (toGloss && !fromGloss && activeSampleRef.current === DEFAULT_SAMPLE.id && LAYER_SAMPLE) {
             openSample(LAYER_SAMPLE);
             return;
         }
-        if (previous === "layers" && activeSampleRef.current === LAYER_SAMPLE?.id) {
+        if (!toGloss && fromGloss && activeSampleRef.current === LAYER_SAMPLE?.id) {
             openSample(DEFAULT_SAMPLE);
             return;
         }
-        if (nextMode === "study" || nextMode === "layers") return;
+        if (nextMode === "study" || toGloss) return;
         if (!imageRef.current) {
             setClusterCount(nextMode === "manual" ? manualCountRef.current : clusterCount);
             return;
@@ -1431,6 +1440,7 @@ function App() {
     const renderModeTabs = (includeStudy = false) => (
         <div role="tablist" className="mode-tabs" aria-label="모드">
             {[
+                ["matte", "매트로 만들기", "광택을 줄여 무광 표면처럼 봅니다", true],
                 ["layers", "레이어 분해", "완성된 그림을 빛 레이어로 나눕니다", true],
                 ["auto", "자동 추출", "그림에서 대표 색을 자동으로 뽑습니다", false],
                 ["manual", "직접 설정", "색 개수와 가중치를 직접 정합니다", false],
@@ -1453,7 +1463,7 @@ function App() {
 
     const renderViewTabs = () => (
         <div className="button-row" role="tablist" aria-label="가운데 보기">
-            {mode === "study" || mode === "layers" ? (
+            {mode === "study" || mode === "layers" || mode === "matte" ? (
                 <button
                     type="button"
                     role="tab"
@@ -1461,7 +1471,7 @@ function App() {
                     className={`mode-tab${centerTab !== "svg" ? " mode-tab-active" : ""}`}
                     onClick={() => openCenter("recolor")}
                 >
-                    {mode === "layers" ? "분해" : "채색"}
+                    {mode === "layers" ? "분해" : mode === "matte" ? "매트" : "채색"}
                 </button>
             ) : (
                 <button
@@ -1510,7 +1520,7 @@ function App() {
             <header className="top">
                 <div className="top-brand">
                     <h1>컬러 팔레트</h1>
-                    <p>그림을 올리면 색을 뽑거나, 빛 레이어로 나눕니다.</p>
+                    <p>그림을 올리면 색을 뽑거나, 빛 레이어로 나누거나, 매트하게 바꿉니다.</p>
                 </div>
                 <div className="top-actions">
                     {renderModeTabs(true)}
@@ -1687,7 +1697,7 @@ function App() {
                             )}
                         </div>
                     )}
-                    {imageData && mode !== "study" && mode !== "layers" && (
+                    {imageData && mode !== "study" && mode !== "layers" && mode !== "matte" && (
                         <details className="scene-block">
                             <summary>색이 어디에 모였는지</summary>
                             <div className="scene-tabs" role="tablist" aria-label="색 분포 보기">
@@ -1781,22 +1791,26 @@ function App() {
                                 ? "선으로 따라 그린 그림"
                                 : mode === "layers"
                                   ? "레이어"
-                                  : mode === "study"
-                                    ? study.view === "glaze"
-                                        ? "빛·반사"
-                                        : "밑색"
-                                    : "다시 칠한 그림"}
+                                  : mode === "matte"
+                                    ? "매트"
+                                    : mode === "study"
+                                      ? study.view === "glaze"
+                                          ? "빛·반사"
+                                          : "밑색"
+                                      : "다시 칠한 그림"}
                         </h2>
                         <p>
                             {centerTab === "svg"
                                 ? "같은 그림을 면과 선으로 따라 그립니다."
                                 : mode === "layers"
                                   ? "쌓기, 단독, 격자, 비교로 나눈 레이어를 봅니다."
-                                  : mode === "study"
-                                    ? study.view === "glaze"
-                                        ? "흑백으로 값을 본 뒤, 어두운 쪽에 반사색, 밝은 쪽에 빛 색을 올립니다."
-                                        : "구분선 왼쪽은 원본, 오른쪽은 빛을 뺀 색입니다."
-                                    : "1번 그림에서 뽑은 색으로 다시 칠한 결과입니다."}
+                                  : mode === "matte"
+                                    ? "왼쪽은 원본, 오른쪽은 광택을 줄인 그림입니다."
+                                    : mode === "study"
+                                      ? study.view === "glaze"
+                                          ? "흑백으로 값을 본 뒤, 어두운 쪽에 반사색, 밝은 쪽에 빛 색을 올립니다."
+                                          : "구분선 왼쪽은 원본, 오른쪽은 빛을 뺀 색입니다."
+                                      : "1번 그림에서 뽑은 색으로 다시 칠한 결과입니다."}
                         </p>
                     </header>
                     <div hidden={centerTab === "svg"}>
@@ -1818,7 +1832,14 @@ function App() {
                                             </div>
                                         </div>
                                     )}
-                                    {imageData && mode !== "study" && mode !== "layers" && clusters.length > 0 && (
+                                    {imageData && mode === "matte" && (
+                                        <div className="palette-summary">
+                                            <div className="stat-count" data-matte-status={matte.status}>
+                                                {matte.status}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {imageData && mode !== "study" && mode !== "layers" && mode !== "matte" && clusters.length > 0 && (
                                         <div className="palette-summary">
                                             <div className="stat-count">색 {clusters.length}개</div>
                                             {mode === "auto" && (
@@ -1837,7 +1858,8 @@ function App() {
                                         )}
                                         {imageData && mode === "study" && <StudyStage study={study} />}
                                         {imageData && mode === "layers" && <RenderLayerStage model={renderLayers} />}
-                                        {imageData && mode !== "study" && mode !== "layers" && (
+                                        {imageData && mode === "matte" && <MatteStage model={matte} />}
+                                        {imageData && mode !== "study" && mode !== "layers" && mode !== "matte" && (
                                             <div className={`center-stage${isLandscape ? "" : " center-stage-portrait"}`}>
                                                 <div className="stage-image-container">
                                                     <div className="panel-image">
@@ -1852,7 +1874,7 @@ function App() {
                                             </div>
                                         )}
                                     </div>
-                                    {imageData && mode !== "study" && mode !== "layers" && isLandscape && clusters.length > 0 && renderShareBar("bottom")}
+                                    {imageData && mode !== "study" && mode !== "layers" && mode !== "matte" && isLandscape && clusters.length > 0 && renderShareBar("bottom")}
                                 </div>
                                 {!replayOpen && imageData && mode === "study" && centerTab !== "svg" && (
                                     <div className="device-controls">{tools}</div>
@@ -1896,22 +1918,24 @@ function App() {
                     )}
                 </main>
 
-                <aside className="panel panel-right" aria-label={centerTab === "svg" ? "그리는 순서" : mode === "layers" ? "레이어 분해" : mode === "study" ? "채색 공부" : "뽑은 색"}>
+                <aside className="panel panel-right" aria-label={centerTab === "svg" ? "그리는 순서" : mode === "matte" ? "매트로 만들기" : mode === "layers" ? "레이어 분해" : mode === "study" ? "채색 공부" : "뽑은 색"}>
                     <header className="region-head">
                         <h2>
                             <span className="region-index">3</span>
-                            {centerTab === "svg" ? "그리는 순서" : mode === "layers" ? "레이어 분해" : mode === "study" ? "채색 공부" : "뽑은 색"}
+                            {centerTab === "svg" ? "그리는 순서" : mode === "matte" ? "매트로 만들기" : mode === "layers" ? "레이어 분해" : mode === "study" ? "채색 공부" : "뽑은 색"}
                         </h2>
                         <p>
                             {centerTab === "svg"
                                 ? "재생 막대를 움직이거나 칸을 누르면 그 장면까지 그려집니다."
-                                : mode === "layers"
-                                    ? "쌓기와 단독은 다른 보기입니다. 체크와 강도는 쌓는 양이고, 격자는 여덟 장을 한눈에 보여 줍니다."
-                                    : mode === "study"
-                                        ? study.view === "glaze"
-                                            ? "빛 색과 반사색을 고르고, 단계로 비교합니다."
-                                            : "빛을 빼서 그림의 밑색을 봅니다."
-                                        : "색 칸을 누르면 그 색만 보고, 체크는 보이기입니다."}
+                                : mode === "matte"
+                                    ? "강도를 올리면 광택이 줄어듭니다. 0이면 원본과 같습니다."
+                                    : mode === "layers"
+                                        ? "쌓기와 단독은 다른 보기입니다. 체크와 강도는 쌓는 양이고, 격자는 여덟 장을 한눈에 보여 줍니다."
+                                        : mode === "study"
+                                            ? study.view === "glaze"
+                                                ? "빛 색과 반사색을 고르고, 단계로 비교합니다."
+                                                : "빛을 빼서 그림의 밑색을 봅니다."
+                                            : "색 칸을 누르면 그 색만 보고, 체크는 보이기입니다."}
                         </p>
                     </header>
                     {centerTab === "svg" ? (
@@ -1934,7 +1958,8 @@ function App() {
                             {imageData && mode === "layers" && (
                                 <RenderLayerPanel model={renderLayers} fileName={imageInfo?.name} sample={activeSample} />
                             )}
-                            {imageData && mode !== "study" && mode !== "layers" && (
+                            {imageData && mode === "matte" && <MattePanel model={matte} fileName={imageInfo?.name} />}
+                            {imageData && mode !== "study" && mode !== "layers" && mode !== "matte" && (
                                 <>
                             {clusters.length > 0 && (
                             <div className="layer-dock-header">
