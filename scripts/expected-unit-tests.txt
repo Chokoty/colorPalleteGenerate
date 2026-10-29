@@ -1,0 +1,14 @@
+src/colorCloud.test.js
+src/colorStudy.test.js
+src/drawnTrace.test.js
+src/hsv.test.js
+src/lightReflection.test.js
+src/pickedColors.test.js
+src/picture.test.js
+src/renderLayerView.test.js
+src/renderLayers.browser.test.js
+src/renderLayers.test.js
+src/shadowTint.test.js
+src/svgTrace.test.js
+src/ui/strokeReplay.test.js
+src/workView.test.js
