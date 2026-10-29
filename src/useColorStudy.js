@@ -162,10 +162,10 @@ export function useColorStudy(imageRef, uploadId, enabled) {
     useEffect(() => {
         if (!enabled) return undefined;
         const stored = imageRef.current;
-        if (!stored) return undefined;
+        if (!stored?.original) return undefined;
         let cancelled = false;
         const timer = setTimeout(() => {
-            const small = downscaleRgba(stored.data, stored.width, stored.height, STUDY_MAX_SIDE);
+            const small = downscaleRgba(stored.original, stored.width, stored.height, STUDY_MAX_SIDE);
             let mask = null;
             if (scope === "brush") {
                 const n = small.width * small.height;

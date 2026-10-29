@@ -121,8 +121,8 @@ export function useRenderLayers(imageRef, uploadId, enabled) {
         if (!enabled) return undefined;
         const worker = workerRef.current;
         const image = imageRef.current;
-        if (!worker || !image?.data) return undefined;
-        const fitted = downscaleRgba(image.data, image.width, image.height, STUDY_MAX_SIDE);
+        if (!worker || !image?.original) return undefined;
+        const fitted = downscaleRgba(image.original, image.width, image.height, STUDY_MAX_SIDE);
         const copy = new Uint8ClampedArray(fitted.data);
         setSource({
             rgba: new Uint8ClampedArray(fitted.data),

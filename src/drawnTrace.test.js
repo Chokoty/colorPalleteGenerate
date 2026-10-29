@@ -4,7 +4,6 @@ import test from "node:test";
 import {
     BATCH_PLAN,
     assignColorPaths,
-    buildDrawnTrace,
     constructionOpacity,
     drawnToSvg,
     elementCap,
@@ -16,10 +15,12 @@ import {
     slicLabels,
     smoothEdges,
     smoothTracePath,
+    trace,
     traceCleanup,
     traceTuning,
     vtracerConfig,
 } from "./drawnTrace.js";
+import { pictureFromPixels } from "./picture.js";
 import { srgbToOklab } from "./colorStudy.js";
 import { asTraceFn, loadVtracer } from "./vtracerTrace.js";
 
@@ -221,30 +222,41 @@ test("ten batches score against the original and export one group each", async (
     const width = 24;
     const height = 16;
     const data = solid(width, height, (x) => (x < 12 ? [255, 0, 0] : [0, 0, 255]));
-    const trace = await buildDrawnTrace({
-        data,
-        width,
-        height,
+    const picture = pictureFromPixels(data, width, height);
+    const run = trace(picture, {
         detail: 40,
         colorCount: 4,
         traceSvg: fakeTrace,
     });
-    assert.equal(trace.batches.length, 10);
+    assert.equal(run.source, picture.original);
+    const traced = await run.promise;
+    assert.equal(traced.batches.length, 10);
     assert.deepEqual(
-        trace.batches.map((batch) => batch.title),
+        traced.batches.map((batch) => batch.title),
         BATCH_PLAN.map((batch) => batch.title)
     );
-    assert.ok(trace.batches[2].paths.length >= 1);
-    assert.equal(trace.batches[3].paths.length, 0);
-    assert.equal(new Set(trace.batches[2].paths.map((path) => path.fill.toLowerCase())).size, 2);
-    assert.ok(trace.batches[0].mae > 0);
-    const doc = drawnToSvg(trace);
+    assert.ok(traced.batches[2].paths.length >= 1);
+    assert.equal(traced.batches[3].paths.length, 0);
+    assert.equal(new Set(traced.batches[2].paths.map((path) => path.fill.toLowerCase())).size, 2);
+    assert.ok(traced.batches[0].mae > 0);
+    const doc = { svg: traced.svg, pathCount: traced.pathCount, bytes: traced.bytes };
     assert.match(doc.svg, /data-title="2-1. 큰 색면"/);
     assert.match(doc.svg, /id="batch-01"[^>]*opacity="0"/);
     assert.match(doc.svg, /id="batch-10"/);
-    assert.equal(doc.pathCount, trace.layers.reduce((sum, layer) => sum + layer.paths.length, 0));
+    assert.equal(doc.pathCount, traced.layers.reduce((sum, layer) => sum + layer.paths.length, 0));
     const same = measureError(data, data);
     assert.equal(same.mae, 0);
+});
+
+test("a fabricated trace is rejected", () => {
+    assert.throws(
+        () => drawnToSvg({
+            width: 2,
+            height: 2,
+            layers: [{ id: "made", role: "flat", paths: [{ d: "M0 0 L2 0 L2 2 Z", fill: "#ff00ff" }] }],
+        }),
+        /picture\.original/
+    );
 });
 
 test("parseSvgPaths keeps the tracer d and fill", () => {
@@ -278,18 +290,18 @@ test("vtracer spline stacked traces two colors as curves", async () => {
     const width = 48;
     const height = 32;
     const data = solid(width, height, (x) => (x < 24 ? [220, 40, 40] : [40, 80, 200]));
-    const trace = await buildDrawnTrace({
-        data,
-        width,
-        height,
+    const picture = pictureFromPixels(data, width, height);
+    const run = trace(picture, {
         detail: 64,
         colorCount: 8,
         traceSvg,
     });
-    const flat = trace.batches[2];
+    assert.equal(run.source, picture.original);
+    const traced = await run.promise;
+    const flat = traced.batches[2];
     assert.ok(flat.paths.length >= 1);
     assert.ok(flat.paths.some((path) => /[CQ]/i.test(path.d)));
-    const fills = trace.batches.slice(2).flatMap((batch) => batch.paths).map((path) => path.fill.toLowerCase());
+    const fills = traced.batches.slice(2).flatMap((batch) => batch.paths).map((path) => path.fill.toLowerCase());
     assert.ok(fills.some((fill) => fill.startsWith("#d") || fill.startsWith("#e") || fill.startsWith("#c")));
     assert.ok(fills.some((fill) => fill.includes("c") || fill.startsWith("#2") || fill.startsWith("#3")));
 });

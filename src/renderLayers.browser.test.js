@@ -64,6 +64,14 @@ function connect(url) {
 
 test("texture toggles, random edits, and view modes keep one status and restore the picture", async () => {
     const errors = [];
+    await waitFor(async () => {
+        try {
+            const response = await fetch(APP);
+            return response.ok;
+        } catch {
+            return false;
+        }
+    }, 60000, "dev server");
     const chrome = spawn(
         "/usr/local/bin/google-chrome",
         [
@@ -107,9 +115,17 @@ test("texture toggles, random edits, and view modes keep one status and restore 
             }
             return result.result?.value;
         };
+        await waitFor(async () => {
+            const href = await evaluate("location.href");
+            if (typeof href !== "string" || !href.startsWith(APP)) return false;
+            const label = await evaluate("document.querySelector('.image-info-name')?.textContent || ''");
+            return String(label).includes("default.webp");
+        }, 60000, "app page");
         await evaluate(`(${install.toString()})()`);
-
-        await waitFor(async () => (await evaluate("window.__layer.name()")).includes("default.webp"), 20000, "default sample");
+        await waitFor(async () => {
+            const name = await evaluate("window.__layer == null ? '' : window.__layer.name()");
+            return String(name).includes("default.webp");
+        }, 20000, "default sample");
         assert.equal(await evaluate('window.__layer.clickText("button[role=tab]", "레이어 분해")'), true);
         await waitFor(async () => (await evaluate("window.__layer.name()")).includes("metal.webp"), 20000, "metal sample");
         await waitFor(async () => (await evaluate("window.__layer.status()")) === "쌓인 레이어 8/8", 20000, "stack status");
