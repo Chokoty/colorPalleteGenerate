@@ -248,6 +248,37 @@ test("ten batches score against the original and export one group each", async (
     assert.equal(same.mae, 0);
 });
 
+test("mutating layers after trace(picture) leaves the rendered SVG unchanged", async () => {
+    const width = 24;
+    const height = 16;
+    const data = solid(width, height, (x) => (x < 12 ? [255, 0, 0] : [0, 0, 255]));
+    const picture = pictureFromPixels(data, width, height);
+    const traced = await trace(picture, {
+        detail: 40,
+        colorCount: 4,
+        traceSvg: fakeTrace,
+    }).promise;
+    const before = traced.render().svg;
+    const animated = traced.render({ animated: true, speed: 1 }).svg;
+    const flat = traced.layers.find((layer) => layer.role === "flat");
+    assert.ok(flat?.paths?.length);
+    flat.paths[0].fill = "#00ff00";
+    flat.paths[0].d = "M0 0 L1 0 L1 1 Z";
+    flat.paths.push({ d: "M0 0 L8 0 L8 8 Z", fill: "#ffffff" });
+    traced.layers.push({
+        id: "tamper",
+        role: "flat",
+        kind: "fill",
+        title: "tamper",
+        paths: [{ d: "M0 0 L4 0 L4 4 Z", fill: "#000000" }],
+    });
+    traced.layers = [];
+    assert.equal(traced.render().svg, before);
+    assert.equal(traced.render({ animated: true, speed: 1 }).svg, animated);
+    assert.match(before, /data-title="2-1. 큰 색면"/);
+    assert.doesNotMatch(traced.render().svg, /tamper|#00ff00/);
+});
+
 test("a fabricated trace is rejected", () => {
     assert.throws(
         () => drawnToSvg({
