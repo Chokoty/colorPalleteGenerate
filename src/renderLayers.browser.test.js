@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import test from "node:test";
+import process from "node:process";
 
 const APP = "http://127.0.0.1:5173/";
 const CHROME = process.env.CHROME_PATH || "/usr/local/bin/google-chrome";

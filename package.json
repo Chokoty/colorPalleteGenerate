@@ -11,7 +11,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node scripts/check-src.mjs && node scripts/run-unit-tests.mjs"
+    "test": "node scripts/check-src.mjs && node scripts/run-unit-tests.mjs",
+    "compare:palettes": "node --expose-gc scripts/compare-palettes.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.0.4",
@@ -34,6 +35,7 @@
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.19",
     "globals": "^15.15.0",
+    "sharp": "^0.35.5",
     "vite": "^6.2.0"
   }
 }

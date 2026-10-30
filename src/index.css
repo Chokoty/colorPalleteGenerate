@@ -454,6 +454,18 @@ b {
     margin-bottom: 4px;
 }
 
+.auto-method {
+    margin-top: 12px;
+}
+
+.auto-method .region-sub {
+    margin: 0 0 8px;
+}
+
+.auto-method .mode-tab {
+    flex: 1 1 0;
+}
+
 .panel-left .mode-tab {
     flex: 1 1 0;
     padding: 8px 4px;
