@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { constructionOpacity, drawnToSvg, measureError, TRACE_MAX_SIDE } from "./drawnTrace.js";
-import { downscaleRgba } from "./useColorStudy";
+import { constructionOpacity, measureError, TRACE_MAX_SIDE, trace } from "./drawnTrace.js";
+import { fitPixels } from "./picture.js";
 import { PlaybackBar } from "./ui/PlaybackBar";
 import { ReplayChrome } from "./ui/ReplayChrome";
 import { strokeReplayStyle } from "./ui/strokeReplay";
@@ -93,49 +93,6 @@ function downloadText(filename, text) {
     URL.revokeObjectURL(url);
 }
 
-function traceWithWorker(job, onProgress) {
-    const worker = new Worker(new URL("./drawnTrace.worker.js", import.meta.url), { type: "module" });
-    let timer;
-    const promise = new Promise((resolve, reject) => {
-        timer = setTimeout(() => {
-            worker.terminate();
-            reject(new Error("trace timeout"));
-        }, 120000);
-        worker.onmessage = (event) => {
-            if (event.data?.type === "progress") {
-                onProgress?.(event.data);
-                return;
-            }
-            clearTimeout(timer);
-            worker.terminate();
-            if (event.data?.type === "error") reject(new Error(event.data.error || "trace failed"));
-            else resolve(event.data.result);
-        };
-        worker.onerror = (event) => {
-            clearTimeout(timer);
-            worker.terminate();
-            reject(new Error(event.message || "worker error"));
-        };
-        const copy = {
-            id: 1,
-            data: new Uint8ClampedArray(job.data),
-            width: job.width,
-            height: job.height,
-            detail: job.detail,
-            colorCount: job.colorCount,
-            ink: null,
-        };
-        worker.postMessage(copy, [copy.data.buffer]);
-    });
-    return {
-        promise,
-        stop() {
-            clearTimeout(timer);
-            worker.terminate();
-        },
-    };
-}
-
 export default function SvgPanel({
     active,
     uploadId,
@@ -209,35 +166,32 @@ export default function SvgPanel({
     }, [replayOpen, menuOpen]);
 
     useEffect(() => {
-        if (!active || !image?.width) return undefined;
+        if (!active || !image?.original) return undefined;
         let cancelled = false;
         let run;
         const timer = setTimeout(() => {
-            const fitted = downscaleRgba(image.data, image.width, image.height, TRACE_MAX_SIDE);
             const id = ++runId.current;
             setStatus("tracing");
             setProgressTitle("");
             const started = performance.now();
-            run = traceWithWorker(
-                {
-                    data: fitted.data,
-                    width: fitted.width,
-                    height: fitted.height,
+            try {
+                run = trace(image, {
                     colorCount,
                     detail,
-                },
-                (progress) => {
-                    if (!cancelled && id === runId.current) setProgressTitle(progress.title || "");
-                }
-            );
+                    onProgress: (progress) => {
+                        if (!cancelled && id === runId.current) setProgressTitle(progress.title || "");
+                    },
+                });
+            } catch (error) {
+                console.error(error);
+                if (!cancelled && id === runId.current) setStatus("error");
+                return;
+            }
             run.promise
                 .then((result) => {
                     if (cancelled || id !== runId.current) return;
-                    const doc = drawnToSvg(result);
                     setPicture({
                         ...result,
-                        bytes: doc.bytes,
-                        pathCount: doc.pathCount,
                         ms: Math.round(performance.now() - started),
                     });
                     setShown(result.layers.length);
@@ -257,11 +211,11 @@ export default function SvgPanel({
     }, [active, image, uploadId, detail, colorCount]);
 
     useEffect(() => {
-        if (!picture || !image?.data || shown < picture.layers.length) return undefined;
+        if (!picture || !image?.original || shown < picture.layers.length) return undefined;
         const node = drawingRef.current;
         if (!node) return undefined;
         let cancelled = false;
-        const fitted = downscaleRgba(image.data, image.width, image.height, TRACE_MAX_SIDE);
+        const fitted = fitPixels(image.original, image.width, image.height, TRACE_MAX_SIDE);
         if (fitted.width !== picture.width || fitted.height !== picture.height) return undefined;
         const clone = node.cloneNode(true);
         clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
@@ -324,7 +278,7 @@ export default function SvgPanel({
 
     const save = (animated) => {
         if (!picture) return;
-        const doc = drawnToSvg(picture, { animated, speed });
+        const doc = picture.render({ animated, speed });
         downloadText(animated ? `${stem}-animated.svg` : `${stem}.svg`, doc.svg);
     };
 

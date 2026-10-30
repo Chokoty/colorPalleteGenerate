@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node --test src/colorStudy.test.js src/svgTrace.test.js src/ui/strokeReplay.test.js src/pickedColors.test.js src/drawnTrace.test.js src/hsv.test.js src/colorCloud.test.js src/shadowTint.test.js src/lightReflection.test.js src/renderLayers.test.js src/renderLayerView.test.js src/renderLayers.browser.test.js src/rgbxyPalette.test.js",
+    "test": "node --test src/colorStudy.test.js src/svgTrace.test.js src/ui/strokeReplay.test.js src/pickedColors.test.js src/drawnTrace.test.js src/picture.test.js src/hsv.test.js src/colorCloud.test.js src/shadowTint.test.js src/lightReflection.test.js src/renderLayers.test.js src/renderLayerView.test.js src/renderLayers.browser.test.js src/rgbxyPalette.test.js",
     "compare:palettes": "node --expose-gc scripts/compare-palettes.mjs"
   },
   "dependencies": {

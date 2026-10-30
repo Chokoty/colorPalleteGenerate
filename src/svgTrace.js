@@ -1,4 +1,4 @@
-import { analyzeColorStudy } from "./colorStudy.js";
+import { traceSource } from "./picture.js";
 
 // In-browser image-to-SVG. No server, no model, no OpenCV.
 // Filled regions become simplified polygons (pixel-corner contours +
@@ -277,7 +277,7 @@ export function eraseSmallIslands(mask, width, height, minArea) {
     return mask;
 }
 
-export function traceFilledMask(mask, width, height, epsilon, minArea = 0) {
+function traceFilledMaskImpl(mask, width, height, epsilon, minArea = 0) {
     const floor = Math.max(1, minArea);
     const groups = connectedComponents(mask, width, height, floor);
     const work = new Uint8Array(mask.length);
@@ -300,6 +300,10 @@ export function traceFilledMask(mask, width, height, epsilon, minArea = 0) {
         if (contours.length) components.push({ area: pixels.length, contours });
     }
     return components;
+}
+
+export function traceFilledMask() {
+    throw new Error("SVG traces picture.original only");
 }
 
 export function limitLabels(labels, colors, colorCount) {
@@ -701,6 +705,10 @@ function finalizeLayers(layers) {
 }
 
 export function buildVectorLayers(job) {
+    traceSource(job?.picture);
+    if (job.labels != null || job.colors != null || job.mass != null || job.data != null || job.ink != null) {
+        throw new Error("SVG traces picture.original only");
+    }
     const width = job.width;
     const height = job.height;
     const settings = detailSettings(job.detail ?? 60, width, height);
@@ -729,7 +737,7 @@ export function buildVectorLayers(job) {
         const color = colors[slot];
         const mask = maskFor(sampled.labels, sampled.width, sampled.height, slot, null, 0);
         if (!mask) continue;
-        const paths = traceFilledMask(mask, sampled.width, sampled.height, eps, minTrace);
+        const paths = traceFilledMaskImpl(mask, sampled.width, sampled.height, eps, minTrace);
         const split = splitComponents(paths, detailTrace);
         const hex = color.hex || rgbToHex255(color.rgb);
         if (split.big.length) layers.push(makeFillLayer("base", hex, split.big, sx, sy));
@@ -737,7 +745,7 @@ export function buildVectorLayers(job) {
         if (job.mass && color.shadow) {
             const shadowMask = maskFor(sampled.labels, sampled.width, sampled.height, slot, sampled.mass, 1);
             if (shadowMask) {
-                const shadowPaths = traceFilledMask(
+                const shadowPaths = traceFilledMaskImpl(
                     shadowMask,
                     sampled.width,
                     sampled.height,
@@ -760,7 +768,7 @@ export function buildVectorLayers(job) {
         if (job.mass && color.light) {
             const lightMask = maskFor(sampled.labels, sampled.width, sampled.height, slot, sampled.mass, 2);
             if (lightMask) {
-                const lightPaths = traceFilledMask(
+                const lightPaths = traceFilledMaskImpl(
                     lightMask,
                     sampled.width,
                     sampled.height,
@@ -871,64 +879,8 @@ function layerGroup(layer, extra = "") {
     return `${open}${title}<path d="${layer.d}" fill="${layer.hex}" fill-rule="evenodd"/></g>`;
 }
 
-export function layersToSvg(layers, width, height, options = {}) {
-    const animated = Boolean(options.animated);
-    const speed = Math.min(2, Math.max(0.1, options.speed || 1));
-    const parts = [
-        `<?xml version="1.0" encoding="UTF-8"?>`,
-        `<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:i="http://ns.adobe.com/AdobeIllustrator/10.0/" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">`,
-    ];
-    if (animated) {
-        const fade = (0.42 / speed).toFixed(3);
-        const draw = (0.9 / speed).toFixed(3);
-        const gap = 0.06 / speed;
-        let time = 0.04;
-        const rules = [];
-        for (let i = 0; i < layers.length; i++) {
-            const layer = layers[i];
-            const isStroke = layer.kind === "stroke";
-            const dur = isStroke ? draw : fade;
-            const delay = time.toFixed(3);
-            if (isStroke) {
-                rules.push(
-                    `#${cssEscape(layer.id)} path{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);animation:svg-draw ${dur}s ease ${delay}s forwards}`
-                );
-            } else {
-                rules.push(
-                    `#${cssEscape(layer.id)}{opacity:0;animation:svg-reveal ${dur}s ease ${delay}s forwards}`
-                );
-            }
-            time += Number(dur) + gap;
-        }
-        parts.push(
-            `<style>@keyframes svg-reveal{to{opacity:1}}@keyframes svg-draw{to{stroke-dashoffset:0}}${rules.join("")}@media (prefers-reduced-motion: reduce){g{animation:none!important;opacity:1!important}path{animation:none!important;stroke-dashoffset:0!important}}</style>`
-        );
-    }
-    for (let i = 0; i < layers.length; i++) {
-        const layer = layers[i];
-        if (animated && layer.kind === "stroke") {
-            const paths = layer.d
-                .map((d, index) => {
-                    const len = (layer.lengths[index] || 0).toFixed(1);
-                    return `<path style="--len:${len}" d="${d}" fill="none" stroke="${layer.hex}" stroke-width="${layer.strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/>`;
-                })
-                .join("");
-            const name = escapeXml(layer.name);
-            const id = escapeXml(layer.id);
-            parts.push(
-                `<g id="${id}" data-name="${name}" inkscape:label="${name}" inkscape:groupmode="layer" i:layer="yes"><title>${name}</title>${paths}</g>`
-            );
-        } else {
-            parts.push(layerGroup(layer));
-        }
-    }
-    parts.push(`</svg>`);
-    const svg = parts.join("");
-    return {
-        svg,
-        bytes: svgByteSize(svg),
-        pathCount: countPaths(layers),
-    };
+export function layersToSvg() {
+    throw new Error("SVG traces picture.original only");
 }
 
 function cssEscape(id) {
@@ -946,127 +898,6 @@ export function inkMaskFromRgba(rgba, width, height, threshold = 200) {
         }
     }
     return count ? { mask, width, height } : null;
-}
-
-export function jobFromPalette({ data, width, height, ids, clusters, colorCount, detail, ink, epsilon, minArea, detailArea, maxSide }) {
-    const colors = clusters.map((cluster) => ({
-        rgb: [
-            Math.round(cluster.rgb[0] * 255),
-            Math.round(cluster.rgb[1] * 255),
-            Math.round(cluster.rgb[2] * 255),
-        ],
-        count: 0,
-        shadow: null,
-        light: null,
-    }));
-    const labels = new Uint16Array(width * height);
-    labels.fill(65535);
-    if (ids && data) {
-        for (let i = 0; i < labels.length; i++) {
-            if (data[i * 4 + 3] < 128) continue;
-            const id = ids[i];
-            if (id >= colors.length) continue;
-            labels[i] = id;
-            colors[id].count++;
-        }
-    }
-    const present = colors.some((color) => color.count > 0);
-    const limited = present
-        ? limitLabels(labels, colors, Math.max(1, colorCount || colors.length))
-        : { labels, colors: [] };
-    // Drop colors that ended up empty after a bad id map, but keep remapped ones.
-    const used = limited.colors
-        .map((color, index) => ({ color, index }))
-        .filter((item) => item.color.count > 0);
-    let nextLabels = limited.labels;
-    let nextColors = limited.colors;
-    if (used.length !== limited.colors.length) {
-        const remap = new Int32Array(limited.colors.length);
-        remap.fill(-1);
-        used.forEach((item, order) => {
-            remap[item.index] = order;
-        });
-        nextLabels = new Uint16Array(limited.labels.length);
-        nextLabels.fill(65535);
-        for (let i = 0; i < limited.labels.length; i++) {
-            const label = limited.labels[i];
-            if (label === 65535) continue;
-            const next = remap[label];
-            if (next >= 0) nextLabels[i] = next;
-        }
-        nextColors = used.map((item) => item.color);
-    }
-    return {
-        width,
-        height,
-        labels: nextLabels,
-        mass: null,
-        colors: nextColors.map((color) => ({
-            ...color,
-            hex: rgbToHex255(color.rgb),
-        })),
-        detail,
-        ink: ink || null,
-        epsilon,
-        minArea,
-        detailArea,
-        maxSide,
-    };
-}
-
-export function jobFromOriginal({ data, width, height, colorCount, detail, ink }) {
-    const requested = Number(colorCount);
-    const baseCount = Math.max(3, Math.min(8, Math.round(Number.isFinite(requested) ? requested : 8)));
-    const analysis = analyzeColorStudy(data, width, height, {
-        baseCount,
-        levels: 3,
-        threshold: 0.06,
-        smoothRadius: 5,
-    });
-    return jobFromStudy({
-        analysis,
-        overrides: null,
-        colorCount: baseCount,
-        detail,
-        ink,
-    });
-}
-
-export function jobFromStudy({ analysis, overrides, colorCount, detail, ink, epsilon, minArea, detailArea, maxSide }) {
-    const bases = analysis?.bases || [];
-    const colors = bases.map((base, index) => {
-        const rgb = overrides?.[index] || base.rgb;
-        return {
-            rgb: [rgb[0], rgb[1], rgb[2]],
-            count: base.count || 0,
-            shadow: base.shadow
-                ? { rgb: base.shadow.rgb.slice(), hex: base.shadow.hex || rgbToHex255(base.shadow.rgb) }
-                : null,
-            light: base.light
-                ? { rgb: base.light.rgb.slice(), hex: base.light.hex || rgbToHex255(base.light.rgb) }
-                : null,
-        };
-    });
-    const labels = analysis?.labels ? new Uint16Array(analysis.labels) : new Uint16Array(0);
-    const limited = colors.length
-        ? limitLabels(labels, colors, Math.max(1, colorCount || colors.length))
-        : { labels, colors: [] };
-    return {
-        width: analysis?.width || 0,
-        height: analysis?.height || 0,
-        labels: limited.labels,
-        mass: analysis?.mass ? new Uint8Array(analysis.mass) : null,
-        colors: limited.colors.map((color) => ({
-            ...color,
-            hex: rgbToHex255(color.rgb),
-        })),
-        detail,
-        ink: ink || null,
-        epsilon,
-        minArea,
-        detailArea,
-        maxSide,
-    };
 }
 
 export function cloneTraceJob(job) {

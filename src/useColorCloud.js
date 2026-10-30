@@ -8,7 +8,7 @@ export function useColorCloud(uploadId, imageRef) {
 
     useEffect(() => {
         const stored = imageRef.current;
-        if (!uploadId || !stored?.data) {
+        if (!uploadId || !stored?.original) {
             setCloud(null);
             return undefined;
         }
@@ -23,15 +23,15 @@ export function useColorCloud(uploadId, imageRef) {
             const data = event.data;
             if (!data || data.id !== uploadId) return;
             if (!data.ok) {
-                apply(binRgbCloud(stored.data, CLOUD_BINS));
+                apply(binRgbCloud(stored.original, CLOUD_BINS));
                 return;
             }
             apply(data);
         };
         worker.onerror = () => {
-            apply(binRgbCloud(stored.data, CLOUD_BINS));
+            apply(binRgbCloud(stored.original, CLOUD_BINS));
         };
-        const copy = new Uint8Array(stored.data);
+        const copy = new Uint8Array(stored.original);
         worker.postMessage({ id: uploadId, rgba: copy.buffer, bins: CLOUD_BINS }, [copy.buffer]);
         return () => {
             cancelled = true;

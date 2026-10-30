@@ -1,0 +1,104 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { completeTrace, drawnToSvg, trace } from "./drawnTrace.js";
+import { derivedPicture, pictureFromPixels, traceSource } from "./picture.js";
+import { buildVectorLayers, layersToSvg, traceFilledMask } from "./svgTrace.js";
+
+function solid(width, height, rgb) {
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < width * height; i++) {
+        data[i * 4] = rgb[0];
+        data[i * 4 + 1] = rgb[1];
+        data[i * 4 + 2] = rgb[2];
+        data[i * 4 + 3] = 255;
+    }
+    return data;
+}
+
+test("the buffer passed to trace is picture.original", async () => {
+    const width = 8;
+    const height = 6;
+    const pixels = solid(width, height, [240, 30, 30]);
+    const picture = pictureFromPixels(pixels, width, height, { source: "sample", name: "default.webp" });
+    assert.equal(traceSource(picture), picture.original);
+    const run = trace(picture, {
+        detail: 64,
+        colorCount: 4,
+        traceSvg: () => "<svg></svg>",
+    });
+    assert.equal(run.source, picture.original);
+    const before = picture.original.slice();
+    await run.promise;
+    assert.deepEqual(picture.original, before);
+});
+
+test("a derived recolor buffer is rejected", () => {
+    const width = 8;
+    const height = 6;
+    const pixels = solid(width, height, [240, 30, 30]);
+    const picture = pictureFromPixels(pixels, width, height);
+    const recolored = solid(width, height, [20, 180, 40]);
+    const derived = derivedPicture(recolored, width, height);
+    derived.original[0] = 1;
+    assert.equal(picture.original[0], 240);
+    assert.throws(() => traceSource(derived), /picture\.original/);
+    assert.throws(() => trace(derived, { traceSvg: () => "<svg></svg>" }), /picture\.original/);
+    assert.throws(
+        () => trace({ kind: "original", original: recolored, width, height }, { traceSvg: () => "<svg></svg>" }),
+        /picture\.original/
+    );
+    assert.throws(() => {
+        picture.original = recolored;
+    }, TypeError);
+});
+
+test("completeTrace and buildVectorLayers reject arbitrary pixels", async () => {
+    const width = 4;
+    const height = 4;
+    const pixels = solid(width, height, [9, 8, 7]);
+    await assert.rejects(
+        () => completeTrace({ data: pixels, width, height }, () => "<svg></svg>"),
+        /picture\.original/
+    );
+    await assert.rejects(
+        () => completeTrace(derivedPicture(pixels, width, height), () => "<svg></svg>"),
+        /picture\.original/
+    );
+    assert.throws(() => buildVectorLayers({ data: pixels, width, height }), /picture\.original/);
+    assert.throws(
+        () => buildVectorLayers({ width, height, labels: new Uint16Array(width * height), colors: [] }),
+        /picture\.original/
+    );
+    const picture = pictureFromPixels(pixels, width, height);
+    const forgedLabels = new Uint16Array(width * height);
+    forgedLabels.fill(0);
+    const forgedColors = [{ rgb: [1, 2, 3], hex: "#010203", count: width * height }];
+    assert.throws(
+        () => buildVectorLayers({ picture, width, height, labels: forgedLabels, colors: forgedColors }),
+        /picture\.original/
+    );
+    const traced = await completeTrace(picture, () => "<svg></svg>");
+    assert.equal(traced.width, width);
+    assert.equal(traced.height, height);
+    assert.match(traced.svg, /<svg/);
+});
+
+test("a fabricated trace, mask, and layers are rejected", () => {
+    const fabricatedTrace = {
+        width: 2,
+        height: 2,
+        layers: [{ id: "made", role: "flat", paths: [{ d: "M0 0 L2 0 L2 2 Z", fill: "#ff00ff" }] }],
+    };
+    assert.throws(() => drawnToSvg(fabricatedTrace), /picture\.original/);
+    const mask = new Uint8Array(4);
+    mask.fill(1);
+    assert.throws(() => traceFilledMask(mask, 2, 2, 0.5, 1), /picture\.original/);
+    assert.throws(
+        () => layersToSvg(
+            [{ id: "made", name: "made", kind: "fill", hex: "#ff00ff", d: "M0 0 L2 0 L2 2 Z", paths: [[]], lengths: [] }],
+            2,
+            2
+        ),
+        /picture\.original/
+    );
+});
