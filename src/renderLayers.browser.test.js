@@ -126,6 +126,28 @@ test("texture toggles, random edits, and view modes keep one status and restore 
             const name = await evaluate("window.__layer == null ? '' : window.__layer.name()");
             return String(name).includes("default.webp");
         }, 20000, "default sample");
+        await waitFor(async () => (await evaluate("window.__layer.opaque()")) > 1000, 20000, "palette preview");
+        assert.equal(await evaluate("document.querySelector('[data-render-status]') == null"), true);
+        const fullCount = await evaluate("window.__layer.opaque()");
+        const fullHash = await evaluate("window.__layer.previewHash()");
+        assert.equal(await evaluate("window.__layer.clickRow()"), true);
+        const soloCount = await waitFor(async () => {
+            const count = await evaluate("window.__layer.opaque()");
+            return count > 0 && count < fullCount ? count : null;
+        }, 10000, "palette solo");
+        assert.ok(soloCount < fullCount);
+        assert.equal(await evaluate("window.__layer.clickRow()"), true);
+        await waitFor(async () => (await evaluate("window.__layer.opaque()")) === fullCount, 10000, "palette solo off");
+        assert.equal(await evaluate('window.__layer.paintChip("#00ff00")'), true);
+        const recolored = await waitFor(async () => {
+            const hash = await evaluate("window.__layer.previewHash()");
+            const count = await evaluate("window.__layer.opaque()");
+            return hash && hash !== fullHash && count === fullCount ? { hash, count } : null;
+        }, 10000, "color chip");
+        assert.equal(await evaluate("window.__layer.clickHex()"), true);
+        await sleep(250);
+        assert.equal(await evaluate("window.__layer.opaque()"), recolored.count);
+        assert.equal(await evaluate("window.__layer.previewHash()"), recolored.hash);
         assert.equal(await evaluate('window.__layer.clickText("button[role=tab]", "레이어 분해")'), true);
         await waitFor(async () => (await evaluate("window.__layer.name()")).includes("metal.webp"), 20000, "metal sample");
         await waitFor(async () => (await evaluate("window.__layer.status()")) === "쌓인 레이어 8/8", 20000, "stack status");
@@ -258,6 +280,44 @@ function install() {
     }
     window.__layer = {
         name: () => document.querySelector(".image-info-name")?.textContent || "",
+        opaque: () => {
+            const canvas = document.querySelector('canvas[aria-label="미리보기"]');
+            if (!canvas || canvas.width < 2) return 0;
+            const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+            let count = 0;
+            for (let i = 3; i < data.length; i += 4) if (data[i] > 0) count++;
+            return count;
+        },
+        previewHash: () => {
+            const canvas = document.querySelector('canvas[aria-label="미리보기"]');
+            if (!canvas || canvas.width < 2) return "";
+            const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+            let hash = 2166136261;
+            for (let i = 0; i < data.length; i += 16) {
+                hash ^= data[i];
+                hash = Math.imul(hash, 16777619);
+            }
+            return `${hash >>> 0}:${canvas.width}x${canvas.height}`;
+        },
+        clickRow: () => {
+            const row = document.querySelector(".layer-list .layer-row");
+            if (!row) return false;
+            row.click();
+            return true;
+        },
+        paintChip: (hex) => {
+            const input = document.querySelector('.layer-list input[type="color"]');
+            if (!input) return false;
+            proto.call(input, hex);
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+            return true;
+        },
+        clickHex: () => {
+            const button = document.querySelector(".layer-list button.layer-hex");
+            if (!button) return false;
+            button.click();
+            return true;
+        },
         status: () => document.querySelector("[data-render-status]")?.textContent || "",
         boxes: () =>
             [...document.querySelectorAll(".render-layers input[type=checkbox]")].map((box) => ({
