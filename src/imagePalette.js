@@ -8,8 +8,8 @@
 // purple (about 23). A bin must hold at least max(200, 0.15% of the opaque
 // pixels) before it can start a swatch, so a few transparent-edge pixels
 // cannot become a color. The loop stops when every such bin is within 18 ΔE.
-// RGBXY additive layer decomposition (Tan, Echevarria, Gingold 2018) is still
-// a later step and is not done here.
+// RGBXY hull sizing (Tan, Echevarria, Gingold 2018) lives in rgbxyPalette.js.
+// This file stays the in-image peak palette.
 
 export const DELTA_E_STOP = 18;
 const MIN_REGION_FRACTION = 0.0015;
