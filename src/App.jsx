@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo, Component } from "react";
+import { useState, useReducer, useRef, useEffect, useCallback, useMemo, Component } from "react";
 import Scene from "./Scene";
 import ColorWheel from "./ColorWheel";
 import { useColorCloud } from "./useColorCloud";
@@ -23,6 +23,7 @@ import { ReplayChrome } from "./ui/ReplayChrome";
 import { addPick, centersWithPicks, pickAt, removePick, restorePicks, rgb01ToHex } from "./pickedColors";
 import { tintedShadowPixel } from "./shadowTint";
 import { loadPictureFile } from "./picture.js";
+import { createWorkView, reduceWorkView } from "./workView.js";
 
 // Main-branch extraction: the user picks k, and centers are k-means means
 // of sampled RGB+XY points. Recolor fills each pixel with its center.
@@ -395,7 +396,18 @@ class PreviewBoundary extends Component {
 }
 
 function App() {
-    const [mode, setMode] = useState("auto");
+    const [work, dispatchWork] = useReducer(reduceWorkView, undefined, createWorkView);
+    const workRef = useRef(work);
+    workRef.current = work;
+    const mode = work.mode;
+    const centerTab = work.centerTab;
+    const solo = work.solo;
+    const showLines = work.showLines;
+    const lineArtVisible = work.lineArtVisible;
+    const shadingVisible = work.shadingVisible;
+    const colorVisible = work.colorVisible;
+    const activeSampleId = work.sampleId;
+    const copiedHex = work.copiedHex;
     const [imageData, setImageData] = useState(null);
     const [clusters, setClusters] = useState([]);
     const [recolorTime, setRecolorTime] = useState(0);
@@ -412,12 +424,8 @@ function App() {
     const [distTab, setDistTab] = useState("rgb");
     const [hsvShape, setHsvShape] = useState("cone");
     const [wheelValue, setWheelValue] = useState(0.75);
-    const [showLines, setShowLines] = useState(false);
     const [inkNote, setInkNote] = useState("");
     const [dragActive, setDragActive] = useState(false);
-    const [shadingVisible, setShadingVisible] = useState(false);
-    const [lineArtVisible, setLineArtVisible] = useState(false);
-    const [colorVisible, setColorVisible] = useState([]);
     const [originalClusters, setOriginalClusters] = useState([]);
     const [bgColor, setBgColor] = useState("#ffffff");
     const [bgVisible, setBgVisible] = useState(true);
@@ -427,7 +435,6 @@ function App() {
     const [shadowTint, setShadowTint] = useState(true);
     const [lineThumb, setLineThumb] = useState(null);
     const [lineArtThumb, setLineArtThumb] = useState(null);
-    const [solo, setSolo] = useState(null);
     const [loadError, setLoadError] = useState(null);
     const [uploadId, setUploadId] = useState(0);
     const [isLoadingImage, setIsLoadingImage] = useState(false);
@@ -435,8 +442,6 @@ function App() {
     const [clusterPositions, setClusterPositions] = useState([]);
     const [pickedPoints, setPickedPoints] = useState([]);
     const [eyedropper, setEyedropper] = useState(false);
-    const [centerTab, setCenterTab] = useState("recolor");
-    const [copiedHex, setCopiedHex] = useState(null);
     const copiedHexTimeoutRef = useRef(null);
     const fileInputRef = useRef(null);
     const canvasRef = useRef(null);
@@ -483,9 +488,21 @@ function App() {
     const [svgReplay, setSvgReplay] = useState(false);
     const [svgDock, setSvgDock] = useState(null);
     const [studyOpen, setStudyOpen] = useState(true);
-    const [activeSampleId, setActiveSampleId] = useState(null);
     const activeSampleRef = useRef(activeSampleId);
     activeSampleRef.current = activeSampleId;
+    const commitWork = (action) => {
+        const next = reduceWorkView(workRef.current, action);
+        workRef.current = next;
+        modeRef.current = next.mode;
+        soloRef.current = next.solo;
+        showLinesRef.current = next.showLines;
+        lineArtVisibleRef.current = next.lineArtVisible;
+        shadingVisibleRef.current = next.shadingVisible;
+        colorVisibleRef.current = next.colorVisible;
+        activeSampleRef.current = next.sampleId;
+        dispatchWork({ type: "hydrate", state: next });
+        return next;
+    };
     const loadSerialRef = useRef(0);
     const loadImageFileRef = useRef(null);
 
@@ -613,8 +630,7 @@ function App() {
         originalClustersRef.current = orig;
         setOriginalClusters(orig);
         setClusterCount(count);
-        colorVisibleRef.current = centers.map(() => true);
-        setColorVisible(colorVisibleRef.current);
+        commitWork({ type: "colors", visible: centers.map(() => true) });
         colorOpacityRef.current = centers.map(() => 100);
         setColorOpacity(colorOpacityRef.current);
         const stats = clusterStats(data, width, height, ids, centers);
@@ -665,8 +681,7 @@ function App() {
         originalClustersRef.current = orig;
         setOriginalClusters(orig);
         setClusterCount(palette.length);
-        colorVisibleRef.current = centers.map(() => true);
-        setColorVisible(colorVisibleRef.current);
+        commitWork({ type: "colors", visible: centers.map(() => true) });
         colorOpacityRef.current = centers.map(() => 100);
         setColorOpacity(colorOpacityRef.current);
         if (!useRgbxy) setDeltaEStop(extracted.deltaEStop);
@@ -706,18 +721,15 @@ function App() {
                 imageRef.current = picture;
                 previewRef.current = picture;
                 inkCacheRef.current = null;
-                lineArtVisibleRef.current = false;
-                soloRef.current = null;
-                colorVisibleRef.current = [];
                 pickedPointsRef.current = [];
                 pickSerialRef.current = 0;
                 setPickedPoints([]);
-                setLineArtVisible(false);
-                setColorVisible([]);
                 setLineThumb(null);
                 setLineArtThumb(null);
-                setSolo(null);
-                setCenterTab("recolor");
+                commitWork({
+                    type: "loaded",
+                    sampleId: source === "upload" ? null : source,
+                });
                 setImageData(picture.previewUrl);
                 setUploadId((id) => id + 1);
                 setLoadError(null);
@@ -728,8 +740,7 @@ function App() {
                     width: picture.fileWidth,
                     height: picture.fileHeight,
                 });
-                setActiveSampleId(source === "upload" ? null : source);
-                if (modeRef.current === "layers") {
+                    if (modeRef.current === "layers") {
                     setClusters([]);
                     setLayerImages([]);
                 } else if (modeRef.current !== "study") {
@@ -803,27 +814,29 @@ function App() {
 
     const switchMode = (nextMode) => {
         if (nextMode === "study") setStudyOpen(true);
-        if (nextMode === "layers") setCenterTab("recolor");
-        if (nextMode === modeRef.current) return;
-        const previous = modeRef.current;
-        modeRef.current = nextMode;
-        setMode(nextMode);
-        if (nextMode === "layers" && activeSampleRef.current === DEFAULT_SAMPLE.id && LAYER_SAMPLE) {
-            openSample(LAYER_SAMPLE);
-            return;
+        const current = workRef.current;
+        const next = commitWork({
+            type: "mode",
+            mode: nextMode,
+            defaultSampleId: DEFAULT_SAMPLE.id,
+            layerSampleId: LAYER_SAMPLE?.id ?? null,
+        });
+        if (next === current) return;
+        if (next.sampleId !== current.sampleId) {
+            const sample = SAMPLES.find((item) => item.id === next.sampleId);
+            if (sample) {
+                openSample(sample);
+                return;
+            }
         }
-        if (previous === "layers" && activeSampleRef.current === LAYER_SAMPLE?.id) {
-            openSample(DEFAULT_SAMPLE);
-            return;
-        }
-        if (nextMode === "study" || nextMode === "layers") return;
+        if (next.mode === "study" || next.mode === "layers") return;
         if (!imageRef.current) {
-            setClusterCount(nextMode === "manual" ? manualCountRef.current : clusterCount);
+            setClusterCount(next.mode === "manual" ? manualCountRef.current : clusterCount);
             return;
         }
         runCurrent(
             imageRef.current,
-            nextMode,
+            next.mode,
             colorWeight,
             spatialWeight,
             manualCountRef.current
@@ -1006,8 +1019,7 @@ function App() {
             if (oldIndex < 0 || oldIndex >= prevOpacity.length) return 100;
             return prevOpacity[oldIndex] ?? 100;
         });
-        colorVisibleRef.current = visible;
-        setColorVisible(visible);
+        commitWork({ type: "colors", visible });
         colorOpacityRef.current = opacity;
         setColorOpacity(opacity);
         clustersRef.current = centers;
@@ -1052,20 +1064,13 @@ function App() {
     };
 
     const setAllColorsVisible = (visible) => {
-        const next = clusters.map(() => visible);
-        colorVisibleRef.current = next;
-        setColorVisible(next);
+        commitWork({ type: "colors", visible: clusters.map(() => visible) });
     };
 
     const colorsAllOn = clusters.length > 0 && clusters.every((_, index) => colorVisible[index] !== false);
 
     const toggleSolo = (next) => {
-        setSolo((current) => {
-            const same = current && current.kind === next.kind && current.index === next.index;
-            const value = same ? null : next;
-            soloRef.current = value;
-            return value;
-        });
+        commitWork({ type: "solo", solo: next });
     };
 
     const copySoloLayer = () => {
@@ -1080,21 +1085,25 @@ function App() {
         canvas.toBlob((blob) => {
             if (!blob) return;
             navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]).then(() => {
-                setCopiedHex("layer");
+                commitWork({ type: "copyHex", hex: "layer" });
                 clearTimeout(copiedHexTimeoutRef.current);
-                copiedHexTimeoutRef.current = setTimeout(() => setCopiedHex(null), 1200);
+                copiedHexTimeoutRef.current = setTimeout(() => commitWork({ type: "copyHex", hex: null }), 1200);
             });
         });
     };
 
     const copyToClipboard = (hex) => {
-        navigator.clipboard.writeText(hex).then(() => {
-            setCopiedHex(hex);
+        const mark = () => {
+            commitWork({ type: "copyHex", hex });
             clearTimeout(copiedHexTimeoutRef.current);
-            copiedHexTimeoutRef.current = setTimeout(() => setCopiedHex(null), 1200);
-        });
+            copiedHexTimeoutRef.current = setTimeout(() => commitWork({ type: "copyHex", hex: null }), 1200);
+        };
+        const write = navigator.clipboard?.writeText?.(hex);
+        if (write?.then) write.then(mark).catch(mark);
+        else mark();
     };
 
+    modeRef.current = mode;
     shadingVisibleRef.current = shadingVisible;
     showLinesRef.current = showLines;
     lineArtVisibleRef.current = lineArtVisible;
@@ -1407,7 +1416,7 @@ function App() {
         } else {
             setSvgReplay(false);
         }
-        setCenterTab(id);
+        commitWork({ type: "center", centerTab: id });
     };
 
     const onReplayMenu = () => {
@@ -1420,24 +1429,19 @@ function App() {
         setReplayMenu((open) => !open);
     };
 
-    const renderModeTabs = (includeStudy = false) => (
+    const renderModeTabs = () => (
         <div role="tablist" className="mode-tabs" aria-label="모드">
-            {[
-                ["layers", "레이어 분해", "완성된 그림을 빛 레이어로 나눕니다", true],
-                ["auto", "자동 추출", "그림에서 대표 색을 자동으로 뽑습니다", false],
-                ["manual", "직접 설정", "색 개수와 가중치를 직접 정합니다", false],
-                ...(includeStudy ? [["study", "채색 공부", "빛을 빼서 밑색을 봅니다", false]] : []),
-            ].map(([id, label, hint, mark]) => (
+            {work.modes.map((item) => (
                 <button
-                    key={id}
+                    key={item.id}
                     type="button"
                     role="tab"
-                    aria-selected={mode === id}
-                    title={hint}
-                    onClick={() => switchMode(id)}
-                    className={`mode-tab${mark ? " mode-tab-mark" : ""}${mode === id ? " mode-tab-active" : ""}`}
+                    aria-selected={mode === item.id}
+                    title={item.hint}
+                    onClick={() => switchMode(item.id)}
+                    className={`mode-tab${item.mark ? " mode-tab-mark" : ""}${mode === item.id ? " mode-tab-active" : ""}`}
                 >
-                    {label}
+                    {item.label}
                 </button>
             ))}
         </div>
@@ -1482,7 +1486,7 @@ function App() {
 
     const tools = (
         <>
-            {replayOpen && renderModeTabs(true)}
+            {replayOpen && renderModeTabs()}
             {replayOpen && mode === "study" && (
                 <StudyControls
                     study={study}
@@ -1505,7 +1509,7 @@ function App() {
                     <p>그림을 올리면 색을 뽑거나, 빛 레이어로 나눕니다.</p>
                 </div>
                 <div className="top-actions">
-                    {renderModeTabs(true)}
+                    {renderModeTabs()}
                     {imageData && renderViewTabs()}
                     <button
                         type="button"
@@ -2009,7 +2013,17 @@ function App() {
                                                             onClick={(event) => event.stopPropagation()}
                                                             onChange={(e) => handleColorChange(i, e)}
                                                         />
-                                                        <span className="layer-hex">{hex}</span>
+                                                        <button
+                                                            type="button"
+                                                            className="layer-hex"
+                                                            onClick={(event) => {
+                                                                event.preventDefault();
+                                                                event.stopPropagation();
+                                                                copyToClipboard(hex);
+                                                            }}
+                                                        >
+                                                            {copiedHex === hex ? "복사됨" : hex}
+                                                        </button>
                                                         {isModified && (
                                                             <button
                                                                 type="button"
@@ -2034,12 +2048,10 @@ function App() {
                                                     onClick={(event) => event.stopPropagation()}
                                                     onChange={(e) => {
                                                         const checked = e.target.checked;
-                                                        setColorVisible((prev) => {
-                                                            const next = clusters.map((_, index) => prev[index] !== false);
-                                                            next[i] = checked;
-                                                            colorVisibleRef.current = next;
-                                                            return next;
-                                                        });
+                                                        const prev = workRef.current.colorVisible;
+                                                        const next = clusters.map((_, index) => prev[index] !== false);
+                                                        next[i] = checked;
+                                                        commitWork({ type: "colors", visible: next });
                                                     }}
                                                 />
                                             </div>
@@ -2076,9 +2088,8 @@ function App() {
                                     data-hidden={showLines ? "false" : "true"}
                                     data-solo={solo?.kind === "lines" ? "true" : "false"}
                                     onClick={() => {
-                                        if (solo?.kind === "lines") toggleSolo({ kind: "lines" });
-                                        showLinesRef.current = !showLines;
-                                        setShowLines((on) => !on);
+                                        if (workRef.current.solo?.kind === "lines") toggleSolo({ kind: "lines" });
+                                        commitWork({ type: "lines", on: !workRef.current.showLines });
                                     }}
                                 >
                                     {lineThumb ? <img src={lineThumb} alt="" /> : <span className="layer-thumb" />}
@@ -2092,8 +2103,7 @@ function App() {
                                         aria-label="선 필터 표시"
                                         onClick={(event) => event.stopPropagation()}
                                         onChange={(event) => {
-                                            showLinesRef.current = event.target.checked;
-                                            setShowLines(event.target.checked);
+                                            commitWork({ type: "lines", on: event.target.checked });
                                         }}
                                     />
                                 </div>
@@ -2104,9 +2114,8 @@ function App() {
                                     data-hidden={lineArtVisible ? "false" : "true"}
                                     data-solo={solo?.kind === "ink" ? "true" : "false"}
                                     onClick={() => {
-                                        if (solo?.kind === "ink") toggleSolo({ kind: "ink" });
-                                        lineArtVisibleRef.current = !lineArtVisible;
-                                        setLineArtVisible((on) => !on);
+                                        if (workRef.current.solo?.kind === "ink") toggleSolo({ kind: "ink" });
+                                        commitWork({ type: "ink", on: !workRef.current.lineArtVisible });
                                     }}
                                 >
                                     {lineArtThumb ? <img src={lineArtThumb} alt="" /> : <span className="layer-thumb" />}
@@ -2120,8 +2129,7 @@ function App() {
                                         aria-label="선화 표시"
                                         onClick={(event) => event.stopPropagation()}
                                         onChange={(event) => {
-                                            lineArtVisibleRef.current = event.target.checked;
-                                            setLineArtVisible(event.target.checked);
+                                            commitWork({ type: "ink", on: event.target.checked });
                                         }}
                                     />
                                 </div>
@@ -2149,9 +2157,8 @@ function App() {
                                     data-hidden={shadingVisible ? "false" : "true"}
                                     data-solo={solo?.kind === "shade" ? "true" : "false"}
                                     onClick={() => {
-                                        if (solo?.kind === "shade") toggleSolo({ kind: "shade" });
-                                        shadingVisibleRef.current = !shadingVisible;
-                                        setShadingVisible((on) => !on);
+                                        if (workRef.current.solo?.kind === "shade") toggleSolo({ kind: "shade" });
+                                        commitWork({ type: "shade", on: !workRef.current.shadingVisible });
                                     }}
                                 >
                                     <span className="layer-thumb" />
@@ -2169,8 +2176,7 @@ function App() {
                                             aria-label="음영 표시"
                                             onClick={(event) => event.stopPropagation()}
                                             onChange={(e) => {
-                                                shadingVisibleRef.current = e.target.checked;
-                                                setShadingVisible(e.target.checked);
+                                                commitWork({ type: "shade", on: e.target.checked });
                                             }}
                                         />
                                     </div>
