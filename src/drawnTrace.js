@@ -1181,12 +1181,26 @@ function renderDrawnSvg(trace, options = {}) {
     return { svg, bytes: new TextEncoder().encode(svg).length, pathCount };
 }
 
+function copyLayers(layers) {
+    return structuredClone(layers || []);
+}
+
+function freezeDeep(value) {
+    if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+    for (const key of Object.keys(value)) freezeDeep(value[key]);
+    return Object.freeze(value);
+}
+
+// render() reads this snapshot. Edits to the returned layers leave the SVG alone.
 function sealTrace(result) {
-    const doc = renderDrawnSvg(result);
+    const layers = freezeDeep(copyLayers(result.layers));
+    const sealed = { width: result.width, height: result.height, layers };
+    const doc = renderDrawnSvg(sealed);
     result.svg = doc.svg;
     result.bytes = doc.bytes;
     result.pathCount = doc.pathCount;
-    result.render = (options) => renderDrawnSvg(result, options);
+    result.layers = copyLayers(layers);
+    result.render = (options) => renderDrawnSvg(sealed, options);
     return result;
 }
 
